@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
+
+:root {
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'Figtree', sans-serif;
+  --bg: #e9ecf1;
+  --ink: #0b0f17;
+  --brand: #1a3df5;
+  --signal: #ff4d1c;
+  --surface: #f7f8fa;
+  --line: rgba(11, 15, 23, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(180deg, rgba(247, 248, 250, 0.92), rgba(233, 236, 241, 0.98)),
+    repeating-linear-gradient(
+      -12deg,
+      transparent,
+      transparent 11px,
+      rgba(11, 15, 23, 0.025) 11px,
+      rgba(11, 15, 23, 0.025) 12px
+    );
+  background-attachment: fixed;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold tracking-tight transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-signal text-white hover:bg-signal-deep;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-ink-950 ring-1 ring-ink-950/15 hover:bg-ink-50;
+  }
+  .btn-ghost {
+    @apply btn text-ink-700 hover:bg-ink-950/5;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .field {
+    @apply w-full rounded-md border border-ink-950/15 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-ink-700;
+  }
+  .card {
+    @apply rounded-xl border border-ink-950/10 bg-white p-5 shadow-soft;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold tracking-tight;
+  }
+  .skeleton {
+    @apply animate-shimmer rounded-md bg-gradient-to-r from-ink-100 via-white to-ink-100 bg-[length:200%_100%];
+  }
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .surface-panel {
+    @apply border border-ink-950/10 bg-[var(--surface)];
+  }
+}

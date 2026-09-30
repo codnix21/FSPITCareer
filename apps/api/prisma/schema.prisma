@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CANDIDATE
+  EMPLOYER
+  ADMIN
+}
+
+enum Grade {
+  JUNIOR
+  MIDDLE
+  SENIOR
+  LEAD
+}
+
+enum WorkFormat {
+  REMOTE
+  OFFICE
+  HYBRID
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum VacancyStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum ResumeStatus {
+  UPLOADED
+  ANALYZING
+  ANALYZED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  firstName    String
+  lastName     String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  candidateProfile CandidateProfile?
+  company          Company?
+  offersSent       Offer[]            @relation("EmployerOffers")
+  offersReceived   Offer[]            @relation("CandidateOffers")
+
+  @@index([role])
+  @@index([email])
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  name        String
+  description String?
+  website     String?
+  city        String?
+  onboardingCompleted Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vacancies Vacancy[]
+  offers    Offer[]
+}
+
+model CandidateProfile {
+  id              String     @id @default(cuid())
+  userId          String     @unique
+  roleTitle       String
+  grade           Grade
+  experienceYears Float      @default(0)
+  salaryFrom      Int?
+  salaryTo        Int?
+  workFormat      WorkFormat @default(REMOTE)
+  about           String?
+  city            String?
+  isVerified      Boolean    @default(false)
+  onboardingCompleted Boolean @default(false)
+  fspParticipantId String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills       CandidateSkill[]
+  experiences  Experience[]
+  educations   Education[]
+  resumes      Resume[]
+  matches      Match[]
+  testAttempts TestAttempt[]
+  achievements FspAchievement[]
+
+  @@index([roleTitle])
+  @@index([grade])
+  @@index([workFormat])
+  @@index([fspParticipantId])
+}
+
+model Skill {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  category  String?
+  createdAt DateTime @default(now())
+
+  candidates CandidateSkill[]
+  vacancies  VacancySkill[]
+}
+
+model CandidateSkill {
+  id          String @id @default(cuid())
+  candidateId String
+  skillId     String
+  level       Int    @default(3)
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  skill     Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, skillId])
+  @@index([skillId])
+}
+
+model Experience {
+  id          String    @id @default(cuid())
+  candidateId String
+  company     String
+  position    String
+  description String?
+  startDate   DateTime
+  endDate     DateTime?
+  isCurrent   Boolean   @default(false)
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Education {
+  id          String  @id @default(cuid())
+  candidateId String
+  institution String
+  degree      String?
+  field       String?
+  yearFrom    Int?
+  yearTo      Int?
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Vacancy {
+  id              String        @id @default(cuid())
+  companyId       String
+  title           String
+  roleTitle       String
+  grade           Grade
+  experienceFrom  Float         @default(0)
+  experienceTo    Float?
+  salaryFrom      Int?
+  salaryTo        Int?
+  workFormat      WorkFormat    @default(REMOTE)
+  description     String?
+  requirements    String?
+  status          VacancyStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  skills   VacancySkill[]
+  matches  Match[]
+  offers   Offer[]
+
+  @@index([status])
+  @@index([roleTitle])
+  @@index([grade])
+  @@index([companyId])
+}
+
+model VacancySkill {
+  id        String @id @default(cuid())
+  vacancyId String
+  skillId   String
+  isRequired Boolean @default(true)
+
+  vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  skill   Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, skillId])
+  @@index([skillId])
+}
+
+model FspParticipant {
+  id        String   @id @default(cuid())
+  externalId String  @unique
+  name      String
+  isDemo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  disciplines FspParticipantDiscipline[]
+  results     FspResult[]
+  roles       String[]
+  ranks       String[]
+}
+
+model FspDiscipline {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+
+  participants FspParticipantDiscipline[]
+  competitions FspCompetition[]
+}
+
+model FspParticipantDiscipline {
+  id            String @id @default(cuid())
+  participantId String
+  disciplineId  String
+
+  participant FspParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  discipline  FspDiscipline  @relation(fields: [disciplineId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, disciplineId])
+}
+
+model FspCompetition {
+  id           String @id @default(cuid())
+  name         String
+  year         Int
+  disciplineId String?
+
+  discipline FspDiscipline? @relation(fields: [disciplineId], references: [id])
+  results    FspResult[]
+}
+
+model FspResult {
+  id            String @id @default(cuid())
+  participantId String
+  competitionId String
+  place         Int?
+  status        String
+
+  participant FspParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  competition FspCompetition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+
+  @@index([participantId])
+}
+
+model FspAchievement {
+  id          String   @id @default(cuid())
+  candidateId String
+  title       String
+  discipline  String
+  place       Int?
+  year        Int
+  status      String
+  isDemo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Resume {
+  id          String       @id @default(cuid())
+  candidateId String
+  fileName    String
+  filePath    String
+  mimeType    String
+  status      ResumeStatus @default(UPLOADED)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  analysis  ResumeAnalysis?
+
+  @@index([candidateId])
+}
+
+model ResumeAnalysis {
+  id          String   @id @default(cuid())
+  resumeId    String   @unique
+  roleTitle   String?
+  experienceYears Float?
+  skills      String[]
+  rawJson     Json?
+  createdAt   DateTime @default(now())
+
+  resume Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+}
+
+model Match {
+  id          String   @id @default(cuid())
+  candidateId String
+  vacancyId   String
+  score       Float
+  breakdown   Json
+  reasons     String[]
+  createdAt   DateTime @default(now())
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancy   Vacancy          @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, vacancyId])
+  @@index([score])
+}
+
+model Offer {
+  id          String      @id @default(cuid())
+  vacancyId   String
+  companyId   String
+  employerId  String
+  candidateId String
+  salary      Int?
+  workFormat  WorkFormat?
+  message     String?
+  status      OfferStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  vacancy   Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employer  User    @relation("EmployerOffers", fields: [employerId], references: [id], onDelete: Cascade)
+  candidate User    @relation("CandidateOffers", fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([candidateId])
+  @@index([employerId])
+}
+
+model Test {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  questions TestQuestion[]
+  attempts  TestAttempt[]
+}
+
+model TestQuestion {
+  id       String @id @default(cuid())
+  testId   String
+  question String
+  options  String[]
+  answer   Int
+
+  test Test @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@index([testId])
+}
+
+model TestAttempt {
+  id          String   @id @default(cuid())
+  testId      String
+  candidateId String
+  score       Float
+  maxScore    Float
+  completedAt DateTime @default(now())
+
+  test      Test             @relation(fields: [testId], references: [id], onDelete: Cascade)
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
