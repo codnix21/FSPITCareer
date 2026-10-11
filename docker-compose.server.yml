@@ -1,0 +1,30 @@
+# Серверный оверрайд: только nginx наружу на localhost (для FastPanel).
+# Запуск:
+#   docker compose -f docker-compose.yml -f docker-compose.server.yml --env-file .env up -d --build
+#
+# FastPanel upstream → 127.0.0.1:8920
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5436:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6386:6379"
+
+  ml-service:
+    ports: !override
+      - "127.0.0.1:8006:8000"
+
+  backend:
+    ports: !override
+      - "127.0.0.1:3021:3001"
+
+  frontend:
+    ports: !override
+      - "127.0.0.1:3020:3000"
+
+  nginx:
+    ports: !override
+      - "127.0.0.1:8920:80"
