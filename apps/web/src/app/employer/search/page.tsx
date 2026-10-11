@@ -1,53 +1,81 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { AppShell, EmptyState, ErrorBox, MatchBadge, SkillChips, Spinner } from '@/components/ui';
+import { AppShell, EmptyState, ErrorBox, MatchBadge, MatchExplain, SkillChips, Spinner } from '@/components/ui';
+import { SearchableMultiSelect, type SelectOption } from '@/components/searchable-select';
 import { api } from '@/lib/api';
 import {
   experienceLabel,
   FORMAT_LABEL,
   formatSalaryShort,
   GRADE_LABEL,
-  ROLE_OPTIONS,
-  TECH_OPTIONS,
+  roleDisplay,
 } from '@/lib/labels';
 import { employerNav } from '@/lib/nav';
+import { optionFromValue, searchReferenceSkills } from '@/lib/reference';
 
-const nav = employerNav;
+type FormState = {
+  roleTitle: string;
+  specializationId: string;
+  grade: string;
+  technologies: string[];
+  experienceFrom: number;
+  salaryFrom: number;
+  salaryTo: number;
+  workFormat: string;
+  vacancyId: string;
+};
+
+const STEPS = ['Кого ищете?', 'Уровень', 'Навыки', 'Условия'];
 
 function SearchInner() {
   const searchParams = useSearchParams();
   const vacancyIdParam = searchParams.get('vacancyId');
 
-  const [form, setForm] = useState({
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState<FormState>({
     roleTitle: 'Backend Developer',
+    specializationId: '',
     grade: 'MIDDLE',
-    technologies: ['Python', 'FastAPI', 'PostgreSQL'] as string[],
+    technologies: ['Python', 'FastAPI', 'PostgreSQL'],
     experienceFrom: 2,
-    experienceTo: 5,
-    salaryFrom: 180000,
-    salaryTo: 260000,
+    salaryFrom: 200000,
+    salaryTo: 250000,
     workFormat: 'REMOTE',
-    sortBy: 'match',
-    hasFspAchievements: false,
     vacancyId: '',
   });
+  const [specializations, setSpecializations] = useState<any[]>([]);
   const [vacancyTitle, setVacancyTitle] = useState('');
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [results, setResults] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [bootstrapping, setBootstrapping] = useState(!!vacancyIdParam);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const techSet = useMemo(() => new Set(form.technologies), [form.technologies]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ind = await api('/reference/industries', { auth: false });
+        const it = (ind.items || []).find((i: any) => i.slug === 'it') || ind.items?.[0];
+        if (!it) return;
+        const specs = await api(`/reference/specializations?industryId=${it.id}`, { auth: false });
+        setSpecializations(specs.items || []);
+        const backend = (specs.items || []).find((s: any) => s.slug === 'backend-development');
+        if (backend) {
+          setForm((f) => ({ ...f, specializationId: f.specializationId || backend.id, roleTitle: backend.name }));
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+  }, []);
 
-  function toggleTech(name: string) {
-    setForm((f) => ({
-      ...f,
-      technologies: techSet.has(name) ? f.technologies.filter((t) => t !== name) : [...f.technologies, name],
-    }));
+  const techOptions: SelectOption[] = form.technologies.map((t) => optionFromValue(t));
+
+  function setTechnologies(next: SelectOption[]) {
+    setForm((f) => ({ ...f, technologies: next.map((o) => o.value) }));
   }
 
   async function runSearch(payload = form) {
@@ -57,11 +85,20 @@ function SearchInner() {
       const res = await api('/matching/search', {
         method: 'POST',
         body: JSON.stringify({
-          ...payload,
+          roleTitle: payload.roleTitle,
+          specializationId: payload.specializationId || undefined,
+          grade: payload.grade,
+          technologies: payload.technologies,
+          experienceFrom: payload.experienceFrom,
+          salaryFrom: payload.salaryFrom,
+          salaryTo: payload.salaryTo,
+          workFormat: payload.workFormat,
+          sortBy: 'match',
           vacancyId: payload.vacancyId || undefined,
         }),
       });
       setResults(res.items || []);
+      setStep(4);
     } catch (err: any) {
       setError(err.message || 'Не удалось выполнить поиск');
     } finally {
@@ -72,24 +109,21 @@ function SearchInner() {
   useEffect(() => {
     if (!vacancyIdParam) {
       setBootstrapping(false);
-      runSearch(form);
       return;
     }
     (async () => {
       try {
         const v = await api(`/vacancies/${vacancyIdParam}`);
-        const next = {
-          roleTitle: v.roleTitle as string,
-          grade: v.grade as string,
-          technologies: (v.skills || []).map((s: any) => s.skill.name) as string[],
+        const next: FormState = {
+          roleTitle: v.roleTitle,
+          specializationId: v.specializationId || '',
+          grade: v.grade,
+          technologies: (v.skills || []).map((s: any) => s.skill.name),
           experienceFrom: Number(v.experienceFrom ?? 0),
-          experienceTo: Number(v.experienceTo ?? 10),
-          salaryFrom: Number(v.salaryFrom ?? 0),
-          salaryTo: Number(v.salaryTo ?? 500000),
-          workFormat: v.workFormat as string,
-          sortBy: 'match',
-          hasFspAchievements: false,
-          vacancyId: v.id as string,
+          salaryFrom: Number(v.salaryFrom ?? 200000),
+          salaryTo: Number(v.salaryTo ?? 250000),
+          workFormat: v.workFormat,
+          vacancyId: v.id,
         };
         setVacancyTitle(v.title);
         setForm(next);
@@ -103,178 +137,280 @@ function SearchInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vacancyIdParam]);
 
-  async function onSearch(e?: FormEvent) {
-    e?.preventDefault();
-    setFiltersOpen(false);
-    await runSearch();
-  }
+  const canNext =
+    (step === 0 && !!form.specializationId) ||
+    (step === 1 && !!form.grade) ||
+    (step === 2 && form.technologies.length > 0) ||
+    step === 3;
 
   return (
-    <AppShell
-      title="Поиск"
-      nav={nav}
-      actions={
-        <button type="button" className="btn-primary !px-3 !py-2 lg:hidden" onClick={() => onSearch()} disabled={loading}>
-          Найти
-        </button>
-      }
-    >
+    <AppShell title="Найти специалиста" nav={employerNav}>
       {vacancyTitle && (
         <p className="mb-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">
           Поиск по вакансии: <strong>{vacancyTitle}</strong>
         </p>
       )}
       {bootstrapping && <Spinner label="Загрузка требований вакансии" />}
+      {error && <ErrorBox message={error} onRetry={() => runSearch()} />}
 
-      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
-        <form onSubmit={onSearch} className="card h-fit space-y-3 lg:sticky lg:top-20">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-display text-base font-bold">Требования</h2>
-            <button type="button" className="text-sm font-semibold text-brand-700 lg:hidden" onClick={() => setFiltersOpen((v) => !v)}>
-              {filtersOpen ? 'Скрыть' : 'Изменить'}
+      {!bootstrapping && results === null && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="font-display text-2xl font-bold md:text-3xl">Найдите подходящего специалиста</h2>
+            <p className="mt-2 text-ink-600">Укажите основные требования — мы подберём специалистов из базы.</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Шаги поиска">
+            {STEPS.map((label, i) => (
+              <button
+                key={label}
+                type="button"
+                role="tab"
+                aria-selected={step === i}
+                onClick={() => setStep(i)}
+                className={`rounded-[10px] px-3 py-2 text-sm font-medium ${step === i ? 'bg-brand-50 text-brand-800 ring-1 ring-brand-200' : 'bg-white text-ink-600 ring-1 ring-ink-950/8'}`}
+              >
+                <span className="mr-1.5 text-xs text-ink-400">{String(i + 1).padStart(2, '0')}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {step === 0 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {specializations.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setForm({ ...form, specializationId: s.id, roleTitle: s.name })}
+                  className={`card !p-4 text-left transition ${form.specializationId === s.id ? 'ring-2 ring-brand-600' : 'hover:border-brand-300'}`}
+                >
+                  <span className="font-display text-base font-bold">{s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Object.entries(GRADE_LABEL).map(([k, v]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setForm({ ...form, grade: k })}
+                  className={`card !p-5 text-center transition ${form.grade === k ? 'ring-2 ring-brand-600' : 'hover:border-brand-300'}`}
+                >
+                  <span className="font-display text-lg font-bold">{v}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="card space-y-2">
+              <SearchableMultiSelect
+                label="Навыки"
+                placeholder="Начните вводить навык..."
+                searchPlaceholder="Начните вводить навык..."
+                idleHint="Начните вводить название навыка"
+                value={techOptions}
+                onChange={setTechnologies}
+                onSearch={searchReferenceSkills}
+              />
+              <p className="text-xs text-ink-500">Подсказки из внешнего справочника HeadHunter.</p>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="card grid max-w-xl gap-4">
+              <div>
+                <label className="label" htmlFor="exp">
+                  Опыт от (лет)
+                </label>
+                <input
+                  id="exp"
+                  className="field"
+                  type="number"
+                  min={0}
+                  value={form.experienceFrom}
+                  onChange={(e) => setForm({ ...form, experienceFrom: Number(e.target.value) })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label" htmlFor="sal-from">
+                    Зарплата от, ₽
+                  </label>
+                  <input
+                    id="sal-from"
+                    className="field"
+                    type="number"
+                    value={form.salaryFrom}
+                    onChange={(e) => setForm({ ...form, salaryFrom: Number(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="sal-to">
+                    до, ₽
+                  </label>
+                  <input
+                    id="sal-to"
+                    className="field"
+                    type="number"
+                    value={form.salaryTo}
+                    onChange={(e) => setForm({ ...form, salaryTo: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+              <fieldset>
+                <legend className="label">Формат</legend>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(FORMAT_LABEL).map(([k, v]) => (
+                    <label key={k} className={`card !p-3 text-center text-sm font-semibold ${form.workFormat === k ? 'ring-2 ring-brand-600' : ''}`}>
+                      <input
+                        type="radio"
+                        className="sr-only"
+                        name="format"
+                        checked={form.workFormat === k}
+                        onChange={() => setForm({ ...form, workFormat: k })}
+                      />
+                      {v}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button type="button" className="btn-secondary" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
+              Назад
+            </button>
+            {step < 3 ? (
+              <button type="button" className="btn-primary" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
+                Далее
+              </button>
+            ) : (
+              <div className="text-right">
+                <button type="button" className="btn-primary !px-8 !py-3 text-base" disabled={loading || form.technologies.length === 0} onClick={() => runSearch()}>
+                  {loading ? 'Ищем…' : 'Найти специалистов'}
+                </button>
+                <p className="mt-2 max-w-sm text-xs text-ink-500">
+                  Поиск учитывает роль, технологии, опыт, уровень, зарплату, формат работы и достижения ФСП.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!bootstrapping && results && (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl font-bold">Подходящие специалисты</h2>
+              <p className="mt-1 text-sm text-ink-600">
+                {results.length} {results.length === 1 ? 'специалист соответствует' : results.length < 5 ? 'специалиста соответствуют' : 'специалистов соответствуют'} вашим требованиям
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setResults(null);
+                setStep(0);
+              }}
+            >
+              Изменить запрос
             </button>
           </div>
 
-          <div className={`space-y-3 ${filtersOpen ? 'block' : 'hidden lg:block'}`}>
-            <div>
-              <label className="label">Роль</label>
-              <select className="field" value={form.roleTitle} onChange={(e) => setForm({ ...form, roleTitle: e.target.value })}>
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="label">Грейд</label>
-              <select className="field" value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>
-                {Object.entries(GRADE_LABEL).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="label">Технологии</label>
-              <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto rounded-md border border-ink-950/10 p-2">
-                {TECH_OPTIONS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => toggleTech(t)}
-                    className={`badge ${techSet.has(t) ? 'bg-brand-100 text-brand-800' : 'bg-ink-50 text-ink-600'}`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="label">Зарплата от</label>
-                <input className="field" type="number" value={form.salaryFrom} onChange={(e) => setForm({ ...form, salaryFrom: Number(e.target.value) })} />
-              </div>
-              <div>
-                <label className="label">до</label>
-                <input className="field" type="number" value={form.salaryTo} onChange={(e) => setForm({ ...form, salaryTo: Number(e.target.value) })} />
-              </div>
-            </div>
-
-            <div>
-              <label className="label">Формат</label>
-              <select className="field" value={form.workFormat} onChange={(e) => setForm({ ...form, workFormat: e.target.value })}>
-                {Object.entries(FORMAT_LABEL).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="label">Сортировка</label>
-              <select className="field" value={form.sortBy} onChange={(e) => setForm({ ...form, sortBy: e.target.value })}>
-                <option value="match">По соответствию</option>
-                <option value="experience">По опыту</option>
-                <option value="achievements">По достижениям</option>
-                <option value="salary">По зарплате</option>
-              </select>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.hasFspAchievements} onChange={(e) => setForm({ ...form, hasFspAchievements: e.target.checked })} />
-              Есть достижения ФСП
-            </label>
+          <div className="rounded-xl border border-ink-950/10 bg-white px-4 py-3 text-sm text-ink-700">
+            <p className="font-semibold">По вашему запросу</p>
+            <p className="mt-1">
+              {roleDisplay(form.roleTitle)} · {GRADE_LABEL[form.grade]} · {form.technologies.slice(0, 5).join(' · ')} ·{' '}
+              {FORMAT_LABEL[form.workFormat]} · {formatSalaryShort(form.salaryFrom, form.salaryTo)}
+            </p>
           </div>
 
-          <button type="submit" className="btn-primary w-full" disabled={loading}>
-            {loading ? 'Поиск…' : 'Найти специалистов'}
-          </button>
-        </form>
+          {loading && <Spinner label="Подбираем специалистов" />}
 
-        <div>
-          {loading && !bootstrapping && <Spinner label="Подбираем специалистов" />}
-          {error && <ErrorBox message={error} onRetry={() => onSearch()} />}
-
-          {!loading && results && (
-            <>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-ink-700">Найдено: {results.length}</p>
-              </div>
-              {results.length === 0 ? (
-                <EmptyState title="Никого не нашли" description="Ослабьте фильтры или уберите часть технологий." />
-              ) : (
-                <div className="grid gap-3">
-                  {results.map((m) => (
-                    <article key={m.id} className="card">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-lg font-semibold">
-                            {m.firstName} {m.lastName}
-                          </h3>
-                          <p className="text-sm text-ink-600">
-                            {m.roleTitle} · {GRADE_LABEL[m.grade]}
-                          </p>
-                        </div>
-                        <MatchBadge score={m.matchScore} />
-                      </div>
-                      <div className="mt-3">
-                        <SkillChips skills={m.skills.map((s: any) => s.name)} />
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-3 text-sm text-ink-600">
-                        <span>{experienceLabel(m.experienceYears)}</span>
-                        <span>{formatSalaryShort(m.salaryFrom, m.salaryTo)}</span>
-                        <span>{FORMAT_LABEL[m.workFormat]}</span>
-                      </div>
-                      {m.achievementsCount > 0 && (
-                        <p className="mt-2 text-sm font-medium text-ink-700">Достижений ФСП: {m.achievementsCount}</p>
-                      )}
-                      {m.reasons?.length > 0 && (
-                        <ul className="mt-3 space-y-1 text-sm text-ink-600">
-                          {m.reasons.slice(0, 3).map((r: string) => (
-                            <li key={r}>✓ {r}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <Link
-                        href={`/employer/candidates/${m.id}?score=${Math.round(m.matchScore)}${form.vacancyId ? `&vacancyId=${form.vacancyId}` : ''}`}
-                        className="btn-primary mt-4 w-full sm:w-auto"
-                      >
-                        Открыть и предложить
-                      </Link>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </>
+          {!loading && results.length === 0 && (
+            <EmptyState
+              title="Никого не нашли"
+              description="Ослабьте требования: уберите часть технологий или расширьте диапазон зарплаты."
+              action={
+                <button type="button" className="btn-primary" onClick={() => { setResults(null); setStep(2); }}>
+                  Изменить технологии
+                </button>
+              }
+            />
           )}
+
+          {!loading &&
+            results.map((m) => {
+              return (
+              <article key={m.id} className="card">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-display text-xl font-bold tracking-tight text-ink-950">
+                      {m.firstName} {m.lastName}
+                    </h3>
+                    <p className="mt-1 text-sm text-ink-700">
+                      {roleDisplay(m.roleTitle)}
+                      <span className="text-ink-400"> · </span>
+                      {GRADE_LABEL[m.grade]}
+                    </p>
+                    <p className="meta-row mt-3">
+                      <span>{experienceLabel(m.experienceYears)}</span>
+                      <span>{FORMAT_LABEL[m.workFormat]}</span>
+                      <span>{formatSalaryShort(m.salaryFrom, m.salaryTo)}</span>
+                    </p>
+                    <div className="mt-3">
+                      <SkillChips skills={(m.skills || []).map((s: any) => s.name).slice(0, 5)} />
+                    </div>
+                    {m.achievementsCount > 0 && (
+                      <p className="mt-3 text-sm font-medium text-brand-800">Есть достижения ФСП</p>
+                    )}
+                  </div>
+                  <MatchBadge score={m.matchScore} size="lg" />
+                </div>
+
+                {expandedId === m.id && (
+                  <div className="mt-4">
+                    <MatchExplain score={m.matchScore} breakdown={m.matchBreakdown} reasons={m.reasons} compact />
+                  </div>
+                )}
+
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-ink-950/5 pt-4">
+                  <button type="button" className="btn-secondary" onClick={() => setExpandedId(expandedId === m.id ? null : m.id)}>
+                    {expandedId === m.id ? 'Скрыть' : 'Почему подходит'}
+                  </button>
+                  <Link
+                    href={`/employer/candidates/${m.id}${form.vacancyId ? `?vacancyId=${form.vacancyId}` : ''}`}
+                    className="btn-primary"
+                    onClick={() => {
+                      try {
+                        // Navigation context only — never authoritative score
+                        sessionStorage.setItem(
+                          `fsp_nav_${m.id}`,
+                          JSON.stringify({
+                            vacancyId: form.vacancyId || null,
+                          }),
+                        );
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
+                    Посмотреть профиль
+                  </Link>
+                </div>
+              </article>
+            );
+            })}
         </div>
-      </div>
+      )}
     </AppShell>
   );
 }

@@ -11,11 +11,39 @@ export class CreateOfferDto {
   @IsString()
   candidateUserId: string;
 
+  /** @deprecated use salaryFrom — kept for API compatibility */
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(0)
   salary?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  salaryFrom?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  salaryTo?: number;
+
+  @ApiPropertyOptional({ example: 'RUB' })
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
 
   @ApiPropertyOptional({ enum: WorkFormat })
   @IsOptional()
@@ -26,6 +54,11 @@ export class CreateOfferDto {
   @IsOptional()
   @IsString()
   message?: string;
+
+  @ApiPropertyOptional({ description: 'ISO date; default = now + OFFER_TTL_DAYS' })
+  @IsOptional()
+  @IsString()
+  expiresAt?: string;
 }
 
 export class UpdateOfferDto {

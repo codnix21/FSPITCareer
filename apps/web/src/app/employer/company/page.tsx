@@ -2,8 +2,10 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { AppShell, ErrorBox, Modal, Spinner } from '@/components/ui';
+import { SearchableSelect } from '@/components/searchable-select';
 import { api } from '@/lib/api';
 import { employerNav } from '@/lib/nav';
+import { optionFromValue, searchReferenceCities } from '@/lib/reference';
 
 const nav = employerNav;
 
@@ -115,8 +117,14 @@ export default function EmployerCompanyPage() {
               <input className="field" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
             </div>
             <div>
-              <label className="label">Город</label>
-              <input className="field" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+              <SearchableSelect
+                label="Город"
+                placeholder="Выберите город..."
+                searchPlaceholder="Поиск города..."
+                value={form.city ? optionFromValue(form.city) : null}
+                onChange={(opt) => setForm({ ...form, city: opt?.value || '' })}
+                onSearch={searchReferenceCities}
+              />
             </div>
           </div>
           <div className="flex gap-2">

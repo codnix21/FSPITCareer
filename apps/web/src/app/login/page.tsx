@@ -89,6 +89,25 @@ export default function LoginPage() {
             Создать профиль
           </Link>
         </p>
+
+        <div className="mt-6 rounded-xl border border-ink-950/10 bg-white p-4 text-sm">
+          <p className="font-semibold text-ink-900">Демо-доступ</p>
+          <p className="mt-1 text-ink-600">Пароль для всех: <code className="rounded bg-ink-50 px-1">Demo123!</code></p>
+          <ul className="mt-3 space-y-2 text-ink-700">
+            <li>
+              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => { setEmail('employer@fsp-career.ru'); setPassword('Demo123!'); }}>
+                Работодатель
+              </button>
+              {' — '}employer@fsp-career.ru
+            </li>
+            <li>
+              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => { setEmail('candidate@fsp-career.ru'); setPassword('Demo123!'); }}>
+                Соискатель
+              </button>
+              {' — '}candidate@fsp-career.ru
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   );

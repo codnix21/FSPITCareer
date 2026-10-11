@@ -2,11 +2,15 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { AuditAction, AuditService } from '../privacy/audit.service';
 
 /** Mock AI resume parser — архитектура готова к замене на реальный ML/LLM сервис */
 @Injectable()
 export class ResumesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async upload(userId: string, file: Express.Multer.File) {
     const profile = await this.prisma.candidateProfile.findUnique({ where: { userId } });
@@ -27,6 +31,13 @@ export class ResumesService {
         mimeType: file.mimetype,
         status: 'UPLOADED',
       },
+    });
+
+    await this.audit.log({
+      actorUserId: userId,
+      action: AuditAction.RESUME_UPLOADED,
+      entityType: 'Resume',
+      entityId: resume.id,
     });
 
     return { id: resume.id, fileName: resume.fileName, status: 'UPLOADED', message: 'Резюме загружено' };
@@ -68,7 +79,10 @@ export class ResumesService {
     for (const skillName of mock.skills) {
       const skill = await this.prisma.skill.upsert({
         where: { name: skillName },
-        create: { name: skillName },
+        create: {
+          name: skillName,
+          slug: skillName.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '-').replace(/^-|-$/g, ''),
+        },
         update: {},
       });
       await this.prisma.candidateSkill.upsert({
@@ -115,7 +129,10 @@ export class ResumesService {
     for (const skillName of analysis.skills || []) {
       const skill = await this.prisma.skill.upsert({
         where: { name: skillName },
-        create: { name: skillName },
+        create: {
+          name: skillName,
+          slug: skillName.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '-').replace(/^-|-$/g, ''),
+        },
         update: {},
       });
       await this.prisma.candidateSkill.upsert({

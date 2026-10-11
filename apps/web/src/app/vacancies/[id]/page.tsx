@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { ErrorBox, MatchBadge, SiteHeader, SkillChips, SkeletonCards } from '@/components/ui';
-import { api } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ErrorBox, MatchBadge, SiteHeader, SkillChips, SkeletonCards, Spinner } from '@/components/ui';
+import { api, ApiError } from '@/lib/api';
 import { getStoredUser } from '@/lib/auth';
+import { applicationStatusLabel, canWithdrawApplication, isActiveApplication } from '@/lib/applications-ui';
 import { FORMAT_LABEL, formatSalary, GRADE_LABEL, SEMANTIC_SOURCE_LABEL, VACANCY_STATUS_LABEL } from '@/lib/labels';
 
 export default function VacancyDetailPage() {
@@ -13,11 +14,26 @@ export default function VacancyDetailPage() {
   const id = params.id as string;
   const [vacancy, setVacancy] = useState<any>(null);
   const [pair, setPair] = useState<any>(null);
+  const [application, setApplication] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const user = typeof window !== 'undefined' ? getStoredUser() : null;
+  const [toast, setToast] = useState('');
+  const [user, setUser] = useState<ReturnType<typeof getStoredUser>>(null);
+
+  const loadApplication = useCallback(async () => {
+    const u = getStoredUser();
+    if (u?.role !== 'CANDIDATE') return;
+    try {
+      const res = await api(`/applications/for-vacancy/${id}`);
+      setApplication(res.application || null);
+    } catch {
+      setApplication(null);
+    }
+  }, [id]);
 
   useEffect(() => {
+    setUser(getStoredUser());
     (async () => {
       try {
         const v = await api(`/vacancies/${id}`, { auth: false });
@@ -32,6 +48,7 @@ export default function VacancyDetailPage() {
           } catch {
             /* guest match unavailable */
           }
+          await loadApplication();
         }
       } catch (e: any) {
         setError(e.message || 'Не удалось загрузить вакансию');
@@ -39,7 +56,47 @@ export default function VacancyDetailPage() {
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [id, loadApplication]);
+
+  async function apply() {
+    setBusy(true);
+    setError('');
+    setToast('');
+    try {
+      const created = await api('/applications', {
+        method: 'POST',
+        body: JSON.stringify({ vacancyId: id }),
+      });
+      setApplication(created);
+      setToast('Отклик отправлен');
+    } catch (e: any) {
+      if (e instanceof ApiError && e.body?.code === 'APPLICATION_DUPLICATE') {
+        setError('Отклик на эту вакансию уже отправлен');
+        await loadApplication();
+      } else {
+        setError(e.message || 'Не удалось откликнуться');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function withdraw() {
+    if (!application?.id) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/applications/${application.id}/withdraw`, { method: 'POST', body: '{}' });
+      setApplication(updated);
+      setToast('Отклик отозван');
+    } catch (e: any) {
+      setError(e.message || 'Не удалось отозвать отклик');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const appliedActive = isActiveApplication(application?.status);
 
   return (
     <div className="min-h-screen">
@@ -47,6 +104,7 @@ export default function VacancyDetailPage() {
       <main className="mx-auto max-w-3xl px-4 py-10 md:px-6">
         {loading && <SkeletonCards count={2} />}
         {error && <ErrorBox message={error} />}
+        {toast && <p className="mb-4 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">{toast}</p>}
 
         {vacancy && (
           <article className="space-y-5">
@@ -99,16 +157,36 @@ export default function VacancyDetailPage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {!user && (
                 <Link href="/register" className="btn-primary">
                   Создать профиль соискателя
                 </Link>
               )}
-              {user?.role === 'CANDIDATE' && (
-                <Link href="/candidate/dashboard" className="btn-primary">
-                  К входящим предложениям
-                </Link>
+              {user?.role === 'CANDIDATE' && vacancy.status === 'ACTIVE' && (
+                <>
+                  {!application && (
+                    <button type="button" className="btn-primary" disabled={busy} onClick={apply}>
+                      {busy ? <Spinner /> : 'Откликнуться'}
+                    </button>
+                  )}
+                  {application && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="badge bg-brand-50 text-brand-800 ring-1 ring-brand-200">
+                        {appliedActive ? 'Отклик отправлен' : applicationStatusLabel(application.status)}
+                        {appliedActive ? ` · ${applicationStatusLabel(application.status)}` : ''}
+                      </span>
+                      {canWithdrawApplication(application.status) && (
+                        <button type="button" className="btn-secondary" disabled={busy} onClick={withdraw}>
+                          Отозвать отклик
+                        </button>
+                      )}
+                      <Link href="/candidate/applications" className="btn-ghost">
+                        Мои отклики
+                      </Link>
+                    </div>
+                  )}
+                </>
               )}
               {user?.role === 'EMPLOYER' && (
                 <Link href={`/employer/search`} className="btn-primary">

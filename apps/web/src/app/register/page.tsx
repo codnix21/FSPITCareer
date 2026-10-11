@@ -18,6 +18,7 @@ function RegisterInner() {
     password: '',
     companyName: '',
   });
+  const [consentAccepted, setConsentAccepted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -38,10 +39,11 @@ function RegisterInner() {
           ...form,
           role,
           companyName: role === 'EMPLOYER' ? form.companyName : undefined,
+          consentAccepted,
         }),
       });
-      saveAuth(res.accessToken, res.user);
-      router.push(role === 'EMPLOYER' ? '/employer/onboarding' : '/candidate/onboarding');
+      saveAuth(res.accessToken, { ...res.user, emailVerified: false });
+      router.push('/verify-email');
     } catch (err: any) {
       setError(err.message || 'Не удалось зарегистрироваться');
     } finally {
@@ -107,8 +109,27 @@ function RegisterInner() {
             <input className="field" required value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
           </div>
         )}
+        <label className="flex items-start gap-2 text-sm text-ink-600">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={consentAccepted}
+            onChange={(e) => setConsentAccepted(e.target.checked)}
+            required
+          />
+          <span>
+            Согласен с{' '}
+            <Link href="/privacy" className="font-semibold text-brand-700 underline">
+              политикой конфиденциальности
+            </Link>{' '}
+            и{' '}
+            <Link href="/terms" className="font-semibold text-brand-700 underline">
+              условиями
+            </Link>
+          </span>
+        </label>
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button type="submit" className="btn-primary w-full" disabled={loading}>
+        <button type="submit" className="btn-primary w-full" disabled={loading || !consentAccepted}>
           {loading ? 'Создание…' : 'Создать профиль'}
         </button>
       </form>
@@ -118,17 +139,6 @@ function RegisterInner() {
         <Link href="/login" className="font-semibold text-brand-700">
           Войти
         </Link>
-      </p>
-      <p className="mt-3 text-xs text-ink-400">
-        Регистрируясь, вы принимаете{' '}
-        <Link href="/terms" className="underline">
-          условия
-        </Link>{' '}
-        и{' '}
-        <Link href="/privacy" className="underline">
-          политику конфиденциальности
-        </Link>
-        .
       </p>
     </div>
   );

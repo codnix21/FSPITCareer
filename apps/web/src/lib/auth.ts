@@ -8,21 +8,35 @@ export type AuthUser = {
   firstName: string;
   lastName: string;
   role: UserRole;
+  emailVerified?: boolean;
   company?: { id: string; name: string; onboardingCompleted?: boolean } | null;
-  candidateProfile?: { id: string; onboardingCompleted?: boolean } | null;
+  candidateProfile?: { id: string; onboardingCompleted?: boolean; profileStatus?: string } | null;
 };
 
 const TOKEN_KEY = 'fsp_token';
 const USER_KEY = 'fsp_user';
 
+const SESSION_COOKIE = 'fsp_session';
+
+function setSessionCookie(on: boolean) {
+  if (typeof document === 'undefined') return;
+  if (on) {
+    document.cookie = `${SESSION_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+  } else {
+    document.cookie = `${SESSION_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+  }
+}
+
 export function saveAuth(token: string, user: AuthUser) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  setSessionCookie(true);
 }
 
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  setSessionCookie(false);
 }
 
 export function getStoredUser(): AuthUser | null {

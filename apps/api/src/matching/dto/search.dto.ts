@@ -7,6 +7,11 @@ export class SearchCandidatesDto {
   @IsString()
   roleTitle: string;
 
+  @ApiPropertyOptional({ description: 'ID специализации' })
+  @IsOptional()
+  @IsString()
+  specializationId?: string;
+
   @ApiProperty({ enum: Grade })
   @IsEnum(Grade)
   grade: Grade;

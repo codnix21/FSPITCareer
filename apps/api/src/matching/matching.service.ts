@@ -1,21 +1,62 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { calculateMatch, MatchVacancyInput } from './matching.engine';
 import { SearchCandidatesDto, SemanticMatchDto } from './dto/search.dto';
-import { Grade, WorkFormat } from '@prisma/client';
+import { Grade, UserRole, WorkFormat } from '@prisma/client';
+import { toMatchingCandidateItem } from '../privacy/candidate-privacy';
+
+type AuthUser = { id: string; role: UserRole };
 
 @Injectable()
 export class MatchingService {
   constructor(private prisma: PrismaService) {}
 
-  async search(dto: SearchCandidatesDto) {
+  private async assertEmployerOwnsVacancy(vacancyId: string, user: AuthUser) {
+    if (user.role === UserRole.ADMIN) return;
+    const company = await this.prisma.company.findUnique({ where: { userId: user.id } });
+    if (!company) throw new ForbiddenException('Профиль компании не найден');
+    const vacancy = await this.prisma.vacancy.findUnique({ where: { id: vacancyId } });
+    if (!vacancy) throw new NotFoundException('Вакансия не найдена');
+    if (vacancy.companyId !== company.id) {
+      throw new ForbiddenException('Нет доступа к этой вакансии');
+    }
+  }
+
+  async search(dto: SearchCandidatesDto, user: AuthUser & { emailVerified?: boolean }) {
+    if (user.role !== UserRole.EMPLOYER && user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Поиск специалистов доступен работодателю');
+    }
+    if (user.role === UserRole.EMPLOYER && user.emailVerified === false) {
+      throw new ForbiddenException({
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Подтвердите email, чтобы продолжить',
+      });
+    }
+
+    if (dto.vacancyId) {
+      await this.assertEmployerOwnsVacancy(dto.vacancyId, user);
+    }
+
     const candidates = await this.prisma.candidateProfile.findMany({
+      where: { profileStatus: 'AVAILABLE' },
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        user: { select: { id: true, firstName: true, lastName: true } },
         skills: { include: { skill: true } },
         achievements: true,
+        specialization: true,
+        assessmentResults: {
+          where: { status: 'PASSED' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
       },
     });
+
+    let vacancySpecializationSlug: string | null = null;
+    if (dto.specializationId) {
+      const spec = await this.prisma.specialization.findUnique({ where: { id: dto.specializationId } });
+      vacancySpecializationSlug = spec?.slug ?? null;
+    }
 
     const vacancyInput: MatchVacancyInput = {
       roleTitle: dto.roleTitle,
@@ -26,25 +67,32 @@ export class MatchingService {
       salaryTo: dto.salaryTo,
       workFormat: dto.workFormat ?? WorkFormat.REMOTE,
       skills: dto.technologies,
+      specializationId: dto.specializationId,
+      specializationSlug: vacancySpecializationSlug,
     };
 
     let results = candidates.map((c) => {
+      const latestAssessment = c.assessmentResults[0];
       const match = calculateMatch(
         {
           id: c.id,
           roleTitle: c.roleTitle,
           grade: c.grade,
+          recommendedGrade: c.recommendedGrade,
           experienceYears: c.experienceYears,
           salaryFrom: c.salaryFrom,
           salaryTo: c.salaryTo,
           workFormat: c.workFormat,
           skills: c.skills.map((s) => s.skill.name),
           fspAchievementsCount: c.achievements.length,
+          specializationId: c.specializationId,
+          specializationSlug: c.specialization?.slug,
+          assessmentScore: latestAssessment?.score ?? null,
         },
         vacancyInput,
       );
 
-      return {
+      return toMatchingCandidateItem({
         id: c.id,
         userId: c.userId,
         firstName: c.user.firstName,
@@ -61,15 +109,18 @@ export class MatchingService {
         matchScore: match.score,
         matchBreakdown: match.breakdown,
         reasons: match.reasons,
-      };
+      });
     });
 
     if (dto.hasFspAchievements) {
       results = results.filter((r) => r.achievementsCount > 0);
     }
 
-    // Soft filter: prefer relevant, but keep list useful for demo (min score 35)
-    results = results.filter((r) => r.matchScore >= 35);
+    results = results.filter((r) => {
+      const b = r.matchBreakdown as any;
+      const taxonomyOk = b.specializationMatch >= 0.5 || b.roleMatch >= 0.5;
+      return taxonomyOk && r.matchScore >= 45;
+    });
 
     switch (dto.sortBy) {
       case 'experience':
@@ -113,35 +164,65 @@ export class MatchingService {
     };
   }
 
-  async matchForVacancy(vacancyId: string) {
+  async matchForVacancy(vacancyId: string, user: AuthUser) {
+    await this.assertEmployerOwnsVacancy(vacancyId, user);
+
     const vacancy = await this.prisma.vacancy.findUnique({
       where: { id: vacancyId },
       include: { skills: { include: { skill: true } } },
     });
     if (!vacancy) return { total: 0, items: [] };
 
-    return this.search({
-      roleTitle: vacancy.roleTitle,
-      grade: vacancy.grade,
-      technologies: vacancy.skills.map((s) => s.skill.name),
-      experienceFrom: vacancy.experienceFrom,
-      experienceTo: vacancy.experienceTo ?? undefined,
-      salaryFrom: vacancy.salaryFrom ?? undefined,
-      salaryTo: vacancy.salaryTo ?? undefined,
-      workFormat: vacancy.workFormat,
-      vacancyId,
-      sortBy: 'match',
-    });
+    return this.search(
+      {
+        roleTitle: vacancy.roleTitle,
+        grade: vacancy.grade,
+        specializationId: vacancy.specializationId ?? undefined,
+        technologies: vacancy.skills.map((s) => s.skill.name),
+        experienceFrom: vacancy.experienceFrom,
+        experienceTo: vacancy.experienceTo ?? undefined,
+        salaryFrom: vacancy.salaryFrom ?? undefined,
+        salaryTo: vacancy.salaryTo ?? undefined,
+        workFormat: vacancy.workFormat,
+        vacancyId,
+        sortBy: 'match',
+      },
+      user,
+    );
   }
 
-  async semantic(dto: SemanticMatchDto) {
+  async semantic(dto: SemanticMatchDto, user?: AuthUser) {
+    if (!user) {
+      throw new ForbiddenException('Требуется авторизация');
+    }
+
+    if (user.role === UserRole.EMPLOYER || user.role === UserRole.ADMIN) {
+      await this.assertEmployerOwnsVacancy(dto.vacancy_id, user);
+    } else if (user.role === UserRole.CANDIDATE) {
+      const profile = await this.prisma.candidateProfile.findUnique({ where: { userId: user.id } });
+      if (!profile || profile.id !== dto.candidate_id) {
+        throw new ForbiddenException('Нет доступа к этому кандидату');
+      }
+    } else {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+
+    return this.semanticCompute(dto);
+  }
+
+  private async semanticCompute(dto: SemanticMatchDto) {
     const candidate = await this.prisma.candidateProfile.findUnique({
       where: { id: dto.candidate_id },
-      include: { skills: { include: { skill: true } }, achievements: true },
+      include: {
+        skills: { include: { skill: true } },
+        achievements: true,
+        specialization: true,
+        assessmentResults: { where: { status: 'PASSED' }, orderBy: { createdAt: 'desc' }, take: 1 },
+      },
     });
     const vacancy = await this.prisma.vacancy.findUnique({
       where: { id: dto.vacancy_id },
-      include: { skills: { include: { skill: true } } },
+      include: { skills: { include: { skill: true } }, specialization: true },
     });
 
     const mlUrl = process.env.ML_SERVICE_URL;
@@ -189,12 +270,16 @@ export class MatchingService {
         id: candidate.id,
         roleTitle: candidate.roleTitle,
         grade: candidate.grade as Grade,
+        recommendedGrade: candidate.recommendedGrade as Grade | null,
         experienceYears: candidate.experienceYears,
         salaryFrom: candidate.salaryFrom,
         salaryTo: candidate.salaryTo,
         workFormat: candidate.workFormat as WorkFormat,
         skills: candidate.skills.map((s) => s.skill.name),
         fspAchievementsCount: candidate.achievements.length,
+        specializationId: candidate.specializationId,
+        specializationSlug: candidate.specialization?.slug,
+        assessmentScore: candidate.assessmentResults[0]?.score ?? null,
       },
       {
         roleTitle: vacancy.roleTitle,
@@ -205,6 +290,8 @@ export class MatchingService {
         salaryTo: vacancy.salaryTo,
         workFormat: vacancy.workFormat as WorkFormat,
         skills: vacancy.skills.map((s) => s.skill.name),
+        specializationId: vacancy.specializationId,
+        specializationSlug: vacancy.specialization?.slug,
       },
     );
 
@@ -214,10 +301,25 @@ export class MatchingService {
     };
   }
 
-  async matchCandidateToVacancies(candidateId: string) {
+  async matchCandidateToVacancies(candidateId: string, user: AuthUser) {
+    const profile = await this.prisma.candidateProfile.findUnique({ where: { id: candidateId } });
+    if (!profile) throw new NotFoundException('Профиль не найден');
+
+    if (user.role === UserRole.CANDIDATE && profile.userId !== user.id) {
+      throw new ForbiddenException('Нет доступа');
+    }
+    if (user.role !== UserRole.CANDIDATE && user.role !== UserRole.ADMIN && user.role !== UserRole.EMPLOYER) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+
     const candidate = await this.prisma.candidateProfile.findUnique({
       where: { id: candidateId },
-      include: { skills: { include: { skill: true } }, achievements: true },
+      include: {
+        skills: { include: { skill: true } },
+        achievements: true,
+        specialization: true,
+        assessmentResults: { where: { status: 'PASSED' }, orderBy: { createdAt: 'desc' }, take: 1 },
+      },
     });
     if (!candidate) return { total: 0, items: [] };
 
@@ -226,6 +328,7 @@ export class MatchingService {
       include: {
         skills: { include: { skill: true } },
         company: true,
+        specialization: true,
       },
     });
 
@@ -236,12 +339,16 @@ export class MatchingService {
             id: candidate.id,
             roleTitle: candidate.roleTitle,
             grade: candidate.grade,
+            recommendedGrade: candidate.recommendedGrade,
             experienceYears: candidate.experienceYears,
             salaryFrom: candidate.salaryFrom,
             salaryTo: candidate.salaryTo,
             workFormat: candidate.workFormat,
             skills: candidate.skills.map((s) => s.skill.name),
             fspAchievementsCount: candidate.achievements.length,
+            specializationId: candidate.specializationId,
+            specializationSlug: candidate.specialization?.slug,
+            assessmentScore: candidate.assessmentResults[0]?.score ?? null,
           },
           {
             roleTitle: v.roleTitle,
@@ -252,6 +359,8 @@ export class MatchingService {
             salaryTo: v.salaryTo,
             workFormat: v.workFormat,
             skills: v.skills.map((s) => s.skill.name),
+            specializationId: v.specializationId,
+            specializationSlug: v.specialization?.slug,
           },
         );
         return {
@@ -272,18 +381,19 @@ export class MatchingService {
           reasons: match.reasons,
         };
       })
-      .filter((i) => i.matchScore >= 40)
+      .filter((i) => {
+        const taxonomyOk = i.matchBreakdown.specializationMatch >= 0.5 || i.matchBreakdown.roleMatch >= 0.5;
+        return i.matchScore >= 45 && taxonomyOk;
+      })
       .sort((a, b) => b.matchScore - a.matchScore);
 
-    // Enrich top results with semantic similarity from ML service
     const top = items.slice(0, 10);
     await Promise.all(
       top.map(async (item) => {
         try {
-          const sem = await this.semantic({ candidate_id: candidateId, vacancy_id: item.id });
+          const sem = await this.semanticCompute({ candidate_id: candidateId, vacancy_id: item.id });
           (item as any).semanticSimilarity = sem.similarity;
           (item as any).semanticSource = sem.source;
-          // Soft blend: 85% rule-based + 15% semantic
           item.matchScore = Math.round((item.matchScore * 0.85 + sem.similarity * 100 * 0.15) * 10) / 10;
         } catch {
           /* keep rule score */
@@ -295,32 +405,49 @@ export class MatchingService {
     return { total: items.length, items };
   }
 
-  async pair(candidateId: string, vacancyId: string) {
+  async pair(candidateId: string, vacancyId: string, user: AuthUser) {
+    if (user.role === UserRole.EMPLOYER || user.role === UserRole.ADMIN) {
+      await this.assertEmployerOwnsVacancy(vacancyId, user);
+    } else if (user.role === UserRole.CANDIDATE) {
+      const profile = await this.prisma.candidateProfile.findUnique({ where: { userId: user.id } });
+      if (!profile || profile.id !== candidateId) {
+        throw new ForbiddenException('Нет доступа');
+      }
+    } else {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+
     const candidate = await this.prisma.candidateProfile.findUnique({
       where: { id: candidateId },
       include: {
         user: { select: { firstName: true, lastName: true } },
         skills: { include: { skill: true } },
         achievements: true,
+        specialization: true,
+        assessmentResults: { where: { status: 'PASSED' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
     const vacancy = await this.prisma.vacancy.findUnique({
       where: { id: vacancyId },
-      include: { skills: { include: { skill: true } }, company: true },
+      include: { skills: { include: { skill: true } }, company: true, specialization: true },
     });
-    if (!candidate || !vacancy) return null;
+    if (!candidate || !vacancy) throw new NotFoundException('Пара не найдена');
 
     const match = calculateMatch(
       {
         id: candidate.id,
         roleTitle: candidate.roleTitle,
         grade: candidate.grade,
+        recommendedGrade: candidate.recommendedGrade,
         experienceYears: candidate.experienceYears,
         salaryFrom: candidate.salaryFrom,
         salaryTo: candidate.salaryTo,
         workFormat: candidate.workFormat,
         skills: candidate.skills.map((s) => s.skill.name),
         fspAchievementsCount: candidate.achievements.length,
+        specializationId: candidate.specializationId,
+        specializationSlug: candidate.specialization?.slug,
+        assessmentScore: candidate.assessmentResults[0]?.score ?? null,
       },
       {
         roleTitle: vacancy.roleTitle,
@@ -331,13 +458,21 @@ export class MatchingService {
         salaryTo: vacancy.salaryTo,
         workFormat: vacancy.workFormat,
         skills: vacancy.skills.map((s) => s.skill.name),
+        specializationId: vacancy.specializationId,
+        specializationSlug: vacancy.specialization?.slug,
       },
     );
 
-    const semantic = await this.semantic({ candidate_id: candidateId, vacancy_id: vacancyId });
+    const semantic = await this.semanticCompute({ candidate_id: candidateId, vacancy_id: vacancyId });
 
     return {
-      vacancy,
+      vacancy: {
+        id: vacancy.id,
+        title: vacancy.title,
+        roleTitle: vacancy.roleTitle,
+        grade: vacancy.grade,
+        company: { id: vacancy.company.id, name: vacancy.company.name },
+      },
       candidate: {
         id: candidate.id,
         name: `${candidate.user.firstName} ${candidate.user.lastName}`,

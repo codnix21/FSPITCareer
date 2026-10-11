@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+uploads
+*.md
+.env
+.env.*
+**/*.spec.ts
+test
+.tsbuildinfo
+**/tsconfig.tsbuildinfo

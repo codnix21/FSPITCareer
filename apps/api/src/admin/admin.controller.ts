@@ -7,10 +7,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { UserRole } from '@prisma/client';
+import { Grade, UserRole } from '@prisma/client';
 import { CandidatesService } from '../candidates/candidates.service';
 import { VacanciesService } from '../vacancies/vacancies.service';
 import { FspService } from '../fsp/fsp.service';
+import { CandidateCategoryService } from '../taxonomy/candidate-category.service';
 
 class SetActiveDto {
   @IsBoolean()
@@ -28,6 +29,7 @@ export class AdminController {
     private candidates: CandidatesService,
     private vacancies: VacanciesService,
     private fsp: FspService,
+    private categories: CandidateCategoryService,
   ) {}
 
   @Get('stats')
@@ -56,8 +58,8 @@ export class AdminController {
 
   @Get('candidates')
   @ApiOperation({ summary: 'Кандидаты' })
-  candidatesList() {
-    return this.candidates.findAll();
+  candidatesList(@CurrentUser() user: { id: string; role: UserRole }) {
+    return this.candidates.findAll({}, user);
   }
 
   @Get('vacancies')
@@ -76,6 +78,24 @@ export class AdminController {
   @ApiOperation({ summary: 'Достижения ФСП' })
   achievements() {
     return this.fsp.listAchievements();
+  }
+
+  @Get('industries')
+  @ApiOperation({ summary: 'Отрасли (read-only)' })
+  industries() {
+    return this.categories.listIndustries().then((items) => ({ total: items.length, items }));
+  }
+
+  @Get('specializations')
+  @ApiOperation({ summary: 'Специализации (read-only)' })
+  specializations(@Query('industryId') industryId?: string) {
+    return this.categories.listSpecializations(industryId).then((items) => ({ total: items.length, items }));
+  }
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Категории кандидатов (read-only)' })
+  categoriesList(@Query('specializationId') specializationId?: string, @Query('grade') grade?: Grade) {
+    return this.categories.listCategories(specializationId, grade).then((items) => ({ total: items.length, items }));
   }
 
   @Get('export')

@@ -2,12 +2,18 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { AppShell, ProgressBar, Spinner } from '@/components/ui';
+import { SearchableMultiSelect, SearchableSelect } from '@/components/searchable-select';
 import { api } from '@/lib/api';
-import { FORMAT_LABEL, GRADE_LABEL, ROLE_OPTIONS, TECH_OPTIONS } from '@/lib/labels';
+import { FORMAT_LABEL, GRADE_LABEL } from '@/lib/labels';
 import { candidateNav } from '@/lib/nav';
+import { optionFromValue, searchReferenceCities, searchReferenceSkills } from '@/lib/reference';
+import { getStoredUser } from '@/lib/auth';
 
 const nav = candidateNav;
+
+const STEPS = ['Отрасль', 'Специализация', 'Уровень', 'Навыки', 'Подтверждение', 'Тестирование'];
 
 export default function CandidateOnboardingPage() {
   const router = useRouter();
@@ -16,8 +22,12 @@ export default function CandidateOnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [emailVerified, setEmailVerified] = useState(true);
+  const [industries, setIndustries] = useState<any[]>([]);
+  const [specializations, setSpecializations] = useState<any[]>([]);
   const [form, setForm] = useState({
-    roleTitle: 'Backend Developer',
+    industryId: '',
+    specializationId: '',
     grade: 'MIDDLE',
     experienceYears: 1,
     salaryFrom: 150000,
@@ -28,20 +38,29 @@ export default function CandidateOnboardingPage() {
     skills: ['Python', 'Git'] as string[],
     fspParticipantId: '',
   });
-  const [resumeStatus, setResumeStatus] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const p = await api('/candidates/me');
+        const user = getStoredUser();
+        const me = await api('/auth/me');
+        setEmailVerified(!!me.emailVerified);
+        if (!me.emailVerified) {
+          setLoading(false);
+          return;
+        }
+
+        const [p, ind] = await Promise.all([api('/candidates/me'), api('/reference/industries', { auth: false })]);
         setProfileId(p.id);
-        if (p.onboardingCompleted) {
+        setIndustries(ind.items || []);
+        if (p.onboardingCompleted && p.profileStatus === 'AVAILABLE') {
           router.replace('/candidate/dashboard');
           return;
         }
         setForm((f) => ({
           ...f,
-          roleTitle: p.roleTitle || f.roleTitle,
+          industryId: p.industryId || (ind.items?.[0]?.id ?? ''),
+          specializationId: p.specializationId || '',
           grade: p.grade || f.grade,
           experienceYears: p.experienceYears || f.experienceYears,
           salaryFrom: p.salaryFrom || f.salaryFrom,
@@ -52,6 +71,13 @@ export default function CandidateOnboardingPage() {
           skills: p.skills?.length ? p.skills.map((s: any) => s.skill.name) : f.skills,
           fspParticipantId: p.fspParticipantId || '',
         }));
+        if (p.industryId || ind.items?.[0]?.id) {
+          const specs = await api(
+            `/reference/specializations?industryId=${p.industryId || ind.items[0].id}`,
+            { auth: false },
+          );
+          setSpecializations(specs.items || []);
+        }
       } catch (e: any) {
         setError(e.message || 'Не удалось загрузить профиль');
       } finally {
@@ -60,15 +86,23 @@ export default function CandidateOnboardingPage() {
     })();
   }, [router]);
 
+  async function loadSpecs(industryId: string) {
+    const specs = await api(`/reference/specializations?industryId=${industryId}`, { auth: false });
+    setSpecializations(specs.items || []);
+  }
+
   async function saveStep(extra: Record<string, unknown> = {}) {
     setSaving(true);
     setError('');
     try {
+      const spec = specializations.find((s) => s.id === form.specializationId);
       await api(`/candidates/${profileId}`, {
         method: 'PUT',
         body: JSON.stringify({
-          roleTitle: form.roleTitle,
+          industryId: form.industryId || undefined,
+          specializationId: form.specializationId || undefined,
           grade: form.grade,
+          roleTitle: spec?.name,
           experienceYears: form.experienceYears,
           salaryFrom: form.salaryFrom,
           salaryTo: form.salaryTo,
@@ -91,11 +125,27 @@ export default function CandidateOnboardingPage() {
   async function next(e?: FormEvent) {
     e?.preventDefault();
     try {
-      if (step < 3) {
+      if (step === 0 && !form.industryId) {
+        setError('Выберите отрасль');
+        return;
+      }
+      if (step === 1 && !form.specializationId) {
+        setError('Выберите специализацию');
+        return;
+      }
+      if (step === 3 && form.skills.length === 0) {
+        setError('Добавьте хотя бы один навык');
+        return;
+      }
+
+      if (step < 4) {
         await saveStep();
         setStep((s) => s + 1);
-      } else {
-        await saveStep({ onboardingCompleted: true, isVerified: true });
+        return;
+      }
+
+      if (step === 4) {
+        await saveStep({ onboardingCompleted: true });
         if (form.fspParticipantId) {
           try {
             await api(`/candidates/${profileId}/achievements/sync`, { method: 'POST' });
@@ -103,34 +153,52 @@ export default function CandidateOnboardingPage() {
             /* optional */
           }
         }
-        router.push('/candidate/dashboard');
+        setStep(5);
+        return;
       }
+
+      router.push('/candidate/tests');
     } catch {
       /* shown */
     }
   }
 
-  async function onUpload(file: File) {
-    setResumeStatus('Резюме загружено. Анализ профиля…');
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const uploaded = await api('/resumes/upload', { method: 'POST', body: fd });
-      const analyzed = await api(`/resumes/${uploaded.id}/analyze`, { method: 'POST' });
-      setForm((f) => ({
-        ...f,
-        roleTitle: analyzed.found.role || f.roleTitle,
-        skills: analyzed.found.skills?.length ? analyzed.found.skills : f.skills,
-      }));
-      setResumeStatus(
-        `Найдено:\nРоль: ${analyzed.found.role}\nОпыт: ${analyzed.found.experience}\nНавыки: ${analyzed.found.skills.join(', ')}`,
-      );
-    } catch (e: any) {
-      setResumeStatus(e.message || 'Не удалось обработать резюме');
-    }
-  }
+  const industryName = industries.find((i) => i.id === form.industryId)?.name || '—';
+  const specializationName = specializations.find((s) => s.id === form.specializationId)?.name || '—';
 
-  const steps = ['Роль и грейд', 'Навыки и условия', 'Резюме', 'ФСП и завершение'];
+  if (!loading && !emailVerified) {
+    return (
+      <AppShell title="Онбординг соискателя" nav={nav}>
+        <div className="card mx-auto max-w-lg space-y-4">
+          <h2 className="section-title">Подтвердите email</h2>
+          <p className="text-sm text-ink-600">
+            Перед заполнением профиля нужно подтвердить адрес электронной почты.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/verify-email" className="btn-primary">
+              Перейти к подтверждению
+            </Link>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={async () => {
+                try {
+                  await api('/auth/resend-verification', { method: 'POST', body: '{}' });
+                  setError('');
+                  alert('Если письмо доступно, оно отправлено повторно. Проверьте консоль сервера в dev.');
+                } catch (e: any) {
+                  setError(e.message);
+                }
+              }}
+            >
+              Отправить письмо ещё раз
+            </button>
+          </div>
+          {error && <p className="text-sm text-red-700">{error}</p>}
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell title="Онбординг соискателя" nav={nav}>
@@ -139,10 +207,10 @@ export default function CandidateOnboardingPage() {
         <div className="mx-auto max-w-2xl space-y-5">
           <div className="card">
             <p className="text-sm text-ink-500">
-              Шаг {step + 1} из {steps.length}: {steps[step]}
+              Шаг {step + 1} из {STEPS.length}: {STEPS[step]}
             </p>
             <div className="mt-3">
-              <ProgressBar value={((step + 1) / steps.length) * 100} />
+              <ProgressBar value={((step + 1) / STEPS.length) * 100} />
             </div>
           </div>
 
@@ -150,17 +218,51 @@ export default function CandidateOnboardingPage() {
 
           <form onSubmit={next} className="card space-y-4">
             {step === 0 && (
+              <div>
+                <label className="label">Отрасль</label>
+                <select
+                  className="field"
+                  value={form.industryId}
+                  onChange={async (e) => {
+                    const industryId = e.target.value;
+                    setForm({ ...form, industryId, specializationId: '' });
+                    await loadSpecs(industryId);
+                  }}
+                  required
+                >
+                  <option value="">Выберите отрасль</option>
+                  {industries.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {step === 1 && (
+              <div>
+                <label className="label">Специализация</label>
+                <select
+                  className="field"
+                  value={form.specializationId}
+                  onChange={(e) => setForm({ ...form, specializationId: e.target.value })}
+                  required
+                >
+                  <option value="">Выберите специализацию</option>
+                  {specializations.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {step === 2 && (
               <>
                 <div>
-                  <label className="label">Профессиональная роль</label>
-                  <select className="field" value={form.roleTitle} onChange={(e) => setForm({ ...form, roleTitle: e.target.value })}>
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Грейд</label>
+                  <label className="label">Предполагаемый уровень</label>
                   <select className="field" value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>
                     {Object.entries(GRADE_LABEL).map(([k, v]) => (
                       <option key={k} value={k}>
@@ -171,40 +273,37 @@ export default function CandidateOnboardingPage() {
                 </div>
                 <div>
                   <label className="label">Опыт (лет)</label>
-                  <input className="field" type="number" min={0} step={0.5} value={form.experienceYears} onChange={(e) => setForm({ ...form, experienceYears: Number(e.target.value) })} />
+                  <input
+                    className="field"
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={form.experienceYears}
+                    onChange={(e) => setForm({ ...form, experienceYears: Number(e.target.value) })}
+                  />
                 </div>
-                <div>
-                  <label className="label">Город</label>
-                  <input className="field" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="Москва" />
-                </div>
+                <SearchableSelect
+                  label="Город"
+                  placeholder="Выберите город..."
+                  searchPlaceholder="Поиск города..."
+                  value={form.city ? optionFromValue(form.city) : null}
+                  onChange={(opt) => setForm({ ...form, city: opt?.value || '' })}
+                  onSearch={searchReferenceCities}
+                />
               </>
             )}
 
-            {step === 1 && (
+            {step === 3 && (
               <>
-                <div>
-                  <label className="label">Технологии</label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {TECH_OPTIONS.map((t) => {
-                      const on = form.skills.includes(t);
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          className={`badge ${on ? 'bg-brand-100 text-brand-800' : 'bg-ink-50 text-ink-600'}`}
-                          onClick={() =>
-                            setForm({
-                              ...form,
-                              skills: on ? form.skills.filter((s) => s !== t) : [...form.skills, t],
-                            })
-                          }
-                        >
-                          {t}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <SearchableMultiSelect
+                  label="Навыки"
+                  placeholder="Начните вводить навык..."
+                  searchPlaceholder="Начните вводить навык..."
+                  idleHint="Начните вводить название навыка"
+                  value={form.skills.map((s) => optionFromValue(s))}
+                  onChange={(opts) => setForm({ ...form, skills: opts.map((o) => o.value) })}
+                  onSearch={searchReferenceSkills}
+                />
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="label">Зарплата от</label>
@@ -227,44 +326,74 @@ export default function CandidateOnboardingPage() {
                 </div>
                 <div>
                   <label className="label">О себе</label>
-                  <textarea className="field min-h-24" value={form.about} onChange={(e) => setForm({ ...form, about: e.target.value })} placeholder="Кратко о профессиональном опыте" />
+                  <textarea className="field min-h-24" value={form.about} onChange={(e) => setForm({ ...form, about: e.target.value })} />
                 </div>
               </>
             )}
 
-            {step === 2 && (
+            {step === 4 && (
               <>
-                <p className="text-sm text-ink-600">Загрузите PDF/DOCX — система структурирует профиль автоматически.</p>
-                <input type="file" accept=".pdf,.doc,.docx" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
-                {resumeStatus && <pre className="whitespace-pre-wrap rounded-xl bg-ink-50 p-3 text-sm">{resumeStatus}</pre>}
-                <p className="text-xs text-ink-400">Можно пропустить и заполнить навыки вручную на предыдущем шаге.</p>
-              </>
-            )}
-
-            {step === 3 && (
-              <>
-                <p className="text-sm text-ink-600">
-                  Укажите ID участника ФСП, чтобы подтянуть подтверждённые достижения.
-                </p>
+                <div className="space-y-2 text-sm text-ink-700">
+                  <p>
+                    <span className="text-ink-500">Отрасль:</span> {industryName}
+                  </p>
+                  <p>
+                    <span className="text-ink-500">Специализация:</span> {specializationName}
+                  </p>
+                  <p>
+                    <span className="text-ink-500">Предполагаемый уровень:</span> {GRADE_LABEL[form.grade]}
+                  </p>
+                  <p>
+                    <span className="text-ink-500">Навыки:</span> {form.skills.join(', ')}
+                  </p>
+                </div>
                 <div>
-                  <label className="label">ID участника ФСП</label>
-                  <input className="field" value={form.fspParticipantId} onChange={(e) => setForm({ ...form, fspParticipantId: e.target.value })} placeholder="fsp-001" />
+                  <label className="label">ID участника ФСП (необязательно)</label>
+                  <input
+                    className="field"
+                    value={form.fspParticipantId}
+                    onChange={(e) => setForm({ ...form, fspParticipantId: e.target.value })}
+                    placeholder="fsp-001"
+                  />
                 </div>
-                <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-900">
-                  После привязки достижения появятся в профиле и участвуют в подборе.
+                <p className="rounded-xl bg-ink-50 px-3 py-2 text-sm text-ink-700">
+                  После подтверждения профиль перейдёт в статус «требуется тестирование». Поиск работодателей откроется после технического теста.
+                </p>
+              </>
+            )}
+
+            {step === 5 && (
+              <>
+                <h3 className="section-title">Техническое тестирование</h3>
+                <p className="text-sm text-ink-600">
+                  Следующий шаг — пройти тест по специализации. Пока тест не завершён, профиль не попадает в подбор работодателей.
+                </p>
+                <p className="text-sm text-ink-500">
+                  После подтверждения вы перейдёте к техническому тестированию. Результат определит рекомендуемый уровень и категорию специалиста.
                 </p>
               </>
             )}
 
             <div className="flex flex-wrap gap-2 pt-2">
-              {step > 0 && (
+              {step > 0 && step < 5 && (
                 <button type="button" className="btn-secondary" onClick={() => setStep((s) => s - 1)}>
                   Назад
                 </button>
               )}
               <button type="submit" className="btn-primary" disabled={saving}>
-                {saving ? 'Сохранение…' : step === 3 ? 'Завершить и открыть кабинет' : 'Далее'}
+                {saving
+                  ? 'Сохранение…'
+                  : step === 4
+                    ? 'Подтвердить профиль'
+                    : step === 5
+                      ? 'Перейти к тестированию'
+                      : 'Далее'}
               </button>
+              {step === 5 && (
+                <Link href="/candidate/dashboard" className="btn-secondary">
+                  В кабинет
+                </Link>
+              )}
             </div>
           </form>
         </div>

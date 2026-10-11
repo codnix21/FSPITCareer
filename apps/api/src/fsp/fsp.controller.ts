@@ -13,6 +13,12 @@ export class FspController {
     return this.fsp.listParticipants();
   }
 
+  @Get('fsp/participants/:id/status')
+  @ApiOperation({ summary: 'Статус связи с ФСП: CONNECTED | NOT_FOUND | UNAVAILABLE' })
+  status(@Param('id') id: string) {
+    return this.fsp.getStatus(id);
+  }
+
   @Get('fsp/participants/:id')
   @ApiOperation({ summary: 'Участник ФСП по id' })
   one(@Param('id') id: string) {

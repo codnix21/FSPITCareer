@@ -55,6 +55,16 @@ export class CreateVacancyDto {
   @IsArray()
   @IsString({ each: true })
   technologies: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  industryId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  specializationId?: string;
 }
 
 export class UpdateVacancyDto {
@@ -118,4 +128,14 @@ export class UpdateVacancyDto {
   @IsArray()
   @IsString({ each: true })
   technologies?: string[];
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  industryId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  specializationId?: string;
 }

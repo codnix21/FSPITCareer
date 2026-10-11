@@ -2,9 +2,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  body: any;
+  constructor(message: string, status: number, body?: any) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -43,12 +45,28 @@ export async function api<T = any>(
     if (res.status === 401 && options.auth !== false) {
       handleUnauthorized();
     }
-    const msg = Array.isArray(data.message)
-      ? data.message.join(', ')
-      : data.message || data.error || 'Произошла ошибка';
-    throw new ApiError(msg, res.status);
+    const raw = data.message;
+    const msg = Array.isArray(raw)
+      ? raw.join(', ')
+      : typeof raw === 'object' && raw?.message
+        ? raw.message
+        : raw || data.error || 'Произошла ошибка';
+    const err = new ApiError(humanizeApiMessage(String(msg)), res.status, typeof raw === 'object' ? raw : data);
+    throw err;
   }
   return data as T;
+}
+
+/** Hide Prisma / stack internals from end users; keep intentional Russian API messages. */
+export function humanizeApiMessage(message: string) {
+  const m = message || 'Произошла ошибка';
+  if (/P\d{4}|PrismaClient|prisma\.|ECONNREFUSED|Cannot read propert/i.test(m)) {
+    return 'Не удалось выполнить действие. Попробуйте ещё раз';
+  }
+  if (/Internal Server Error/i.test(m)) {
+    return 'Внутренняя ошибка сервера';
+  }
+  return m;
 }
 
 export { API_URL };

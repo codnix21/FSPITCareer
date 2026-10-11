@@ -53,6 +53,13 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       SEED_ON_START: ${SEED_ON_START:-false}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+    # Nest emits dist/src/main.js (src imports prisma/taxonomy.ts)
+    command:
+      [
+        "sh",
+        "-c",
+        "npx prisma migrate deploy && if [ \"$$SEED_ON_START\" = \"true\" ]; then npx prisma db seed; fi && node dist/src/main.js",
+      ]
     ports:
       - "${API_PORT:-3001}:3001"
     volumes:

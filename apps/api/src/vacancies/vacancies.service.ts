@@ -2,15 +2,21 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateVacancyDto, UpdateVacancyDto } from './dto/vacancy.dto';
 import { UserRole, VacancyStatus } from '@prisma/client';
+import { SkillPersistenceService } from '../reference/skill-persistence.service';
 
 const vacancyInclude = {
   company: true,
   skills: { include: { skill: true } },
+  industry: true,
+  specialization: true,
 };
 
 @Injectable()
 export class VacanciesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private skills: SkillPersistenceService,
+  ) {}
 
   async findAll(query?: { status?: VacancyStatus; companyId?: string }) {
     const where: any = {};
@@ -51,6 +57,8 @@ export class VacanciesService {
         workFormat: dto.workFormat ?? 'REMOTE',
         description: dto.description,
         requirements: dto.requirements,
+        industryId: dto.industryId,
+        specializationId: dto.specializationId,
         status: 'ACTIVE',
       },
     });
@@ -99,11 +107,7 @@ export class VacanciesService {
   private async syncSkills(vacancyId: string, technologies: string[]) {
     await this.prisma.vacancySkill.deleteMany({ where: { vacancyId } });
     for (const name of technologies) {
-      const skill = await this.prisma.skill.upsert({
-        where: { name },
-        create: { name },
-        update: {},
-      });
+      const skill = await this.skills.ensureSkill({ name });
       await this.prisma.vacancySkill.create({
         data: { vacancyId, skillId: skill.id, isRequired: true },
       });

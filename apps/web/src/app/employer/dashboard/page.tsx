@@ -2,19 +2,16 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { AppShell, EmptyState, ErrorBox, MatchBadge, SkillChips, Spinner } from '@/components/ui';
+import { AppShell, EmptyState, ErrorBox, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
-import { GRADE_LABEL } from '@/lib/labels';
+import { GRADE_LABEL, OFFER_STATUS_LABEL, roleDisplay, VACANCY_STATUS_LABEL } from '@/lib/labels';
 import { employerNav } from '@/lib/nav';
 
-const nav = employerNav;
-
 export default function EmployerDashboardPage() {
-  const [stats, setStats] = useState<any>(null);
-  const [userName, setUserName] = useState('Алексей');
-  const [matches, setMatches] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [recentOffers, setRecentOffers] = useState<any[]>([]);
+  const [userName, setUserName] = useState('');
+  const [vacancies, setVacancies] = useState<any[]>([]);
+  const [matchCounts, setMatchCounts] = useState<Record<string, number>>({});
+  const [offers, setOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -22,34 +19,32 @@ export default function EmployerDashboardPage() {
     const raw = localStorage.getItem('fsp_user');
     if (raw) {
       try {
-        const u = JSON.parse(raw);
-        setUserName(u.firstName || 'Алексей');
-      } catch {}
+        setUserName(JSON.parse(raw).firstName || '');
+      } catch {
+        /* ignore */
+      }
     }
 
     (async () => {
       try {
-        const [s, search, notes, offers] = await Promise.all([
-          api('/vacancies/employer/stats'),
-          api('/matching/search', {
-            method: 'POST',
-            body: JSON.stringify({
-              roleTitle: 'Backend Developer',
-              grade: 'MIDDLE',
-              technologies: ['Python', 'FastAPI', 'PostgreSQL'],
-              salaryFrom: 180000,
-              salaryTo: 260000,
-              workFormat: 'REMOTE',
-              sortBy: 'match',
-            }),
+        const [mine, offs] = await Promise.all([api('/vacancies/employer/mine'), api('/offers')]);
+        const items = mine.items || [];
+        setVacancies(items);
+        setOffers(offs.items || []);
+
+        const active = items.filter((v: any) => v.status === 'ACTIVE').slice(0, 5);
+        const counts: Record<string, number> = {};
+        await Promise.all(
+          active.map(async (v: any) => {
+            try {
+              const res = await api(`/matching/vacancies/${v.id}`);
+              counts[v.id] = res.total ?? res.items?.length ?? 0;
+            } catch {
+              counts[v.id] = 0;
+            }
           }),
-          api('/notifications'),
-          api('/offers'),
-        ]);
-        setStats(s);
-        setMatches(search.items?.slice(0, 5) || []);
-        setNotifications(notes.items || []);
-        setRecentOffers((offers.items || []).slice(0, 5));
+        );
+        setMatchCounts(counts);
       } catch (e: any) {
         setError(e.message || 'Не удалось загрузить панель');
       } finally {
@@ -58,109 +53,111 @@ export default function EmployerDashboardPage() {
     })();
   }, []);
 
+  const pendingOffers = offers.filter((o) => o.status === 'PENDING').length;
+  const newMatches = Object.values(matchCounts).reduce((a, b) => a + b, 0);
+
   return (
-    <AppShell
-      title={`Привет, ${userName}`}
-      nav={nav}
-      actions={
-        <Link href="/employer/search" className="btn-primary !px-3 !py-2">
-          Найти
-        </Link>
-      }
-    >
+    <AppShell title={userName ? `Добрый день, ${userName}` : 'Главная'} nav={employerNav}>
       {loading && <Spinner label="Загрузка" />}
       {error && <ErrorBox message={error} />}
 
       {!loading && !error && (
-        <div className="space-y-6">
-          {notifications.length > 0 && (
-            <section className="space-y-2">
-              {notifications.map((n) => (
-                <Link key={n.type} href={n.href || '/employer/offers'} className="block rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-900">
-                  <strong>{n.title}:</strong> {n.message}
-                </Link>
-              ))}
-            </section>
-          )}
-
-          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-            {[
-              { label: 'Вакансии', value: stats?.activeVacancies ?? 0, href: '/employer/vacancies' },
-              { label: 'Специалисты', value: stats?.foundCandidates ?? matches.length, href: '/employer/search' },
-              { label: 'Офферы', value: stats?.sentOffers ?? 0, href: '/employer/offers' },
-              { label: 'Ответы', value: stats?.responses ?? 0, href: '/employer/offers' },
-            ].map((item) => (
-              <Link key={item.label} href={item.href} className="card !py-4 transition hover:border-brand-300">
-                <p className="text-xs font-medium text-ink-500">{item.label}</p>
-                <p className="mt-1 text-2xl font-bold text-ink-900">{item.value}</p>
-              </Link>
-            ))}
+        <div className="space-y-8">
+          <section className="relative overflow-hidden rounded-xl border border-ink-950/8 bg-ink-950 px-6 py-9 text-white md:px-8">
+            <p className="text-sm text-white/55">Что сделать сейчас</p>
+            <h2 className="mt-2 max-w-lg font-display text-2xl font-bold tracking-tight md:text-3xl">Найдите специалиста</h2>
+            <p className="mt-3 max-w-md text-sm text-white/65">
+              Опишите роль, уровень и технологии — система подберёт кандидатов и объяснит соответствие.
+            </p>
+            <Link href="/employer/search" className="btn-primary mt-6 inline-flex !px-8 !py-3 text-base">
+              Найти специалиста
+            </Link>
           </section>
 
           <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold">Лучшие совпадения</h3>
-              <Link href="/employer/search" className="text-sm font-semibold text-brand-700">
-                Весь поиск
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="font-display text-lg font-bold">Ваши вакансии</h3>
+              <Link href="/employer/vacancies" className="text-sm font-semibold text-brand-700">
+                Все вакансии
               </Link>
             </div>
-            {matches.length === 0 ? (
+            {vacancies.length === 0 ? (
               <EmptyState
-                title="Пока пусто"
-                description="Откройте поиск — система подберёт специалистов."
+                title="У вас пока нет вакансий"
+                description="Создайте первую вакансию, чтобы найти подходящих IT-специалистов."
                 action={
-                  <Link href="/employer/search" className="btn-primary">
-                    Найти специалистов
+                  <Link href="/employer/vacancies" className="btn-primary">
+                    Создать вакансию
                   </Link>
                 }
               />
             ) : (
               <div className="grid gap-3">
-                {matches.map((m) => (
-                  <article key={m.id} className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
+                {vacancies.slice(0, 5).map((v) => (
+                  <article key={v.id} className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="font-semibold">
-                          {m.firstName} {m.lastName}
-                        </h4>
-                        <MatchBadge score={m.matchScore} />
+                        <h4 className="font-semibold">{v.title}</h4>
+                        <span className="badge bg-ink-50 text-ink-700">{VACANCY_STATUS_LABEL[v.status] || v.status}</span>
                       </div>
                       <p className="mt-1 text-sm text-ink-600">
-                        {m.roleTitle} · {GRADE_LABEL[m.grade]}
+                        {roleDisplay(v.roleTitle)} · {GRADE_LABEL[v.grade]}
                       </p>
-                      <div className="mt-2">
-                        <SkillChips skills={m.skills.map((s: any) => s.name).slice(0, 5)} />
-                      </div>
+                      {v.status === 'ACTIVE' && (
+                        <p className="mt-2 text-sm font-medium text-brand-800">
+                          {matchCounts[v.id] != null
+                            ? (() => {
+                                const n = matchCounts[v.id];
+                                const word = n === 1 ? 'подходящий специалист' : n < 5 ? 'подходящих специалиста' : 'подходящих специалистов';
+                                return `${n} ${word}`;
+                              })()
+                            : 'Считаем совпадения…'}
+                        </p>
+                      )}
                     </div>
-                    <Link href={`/employer/candidates/${m.id}`} className="btn-primary shrink-0">
-                      Открыть
-                    </Link>
+                    <div className="flex flex-wrap gap-2">
+                      {v.status === 'ACTIVE' && (
+                        <Link href={`/employer/search?vacancyId=${v.id}`} className="btn-primary">
+                          Посмотреть специалистов
+                        </Link>
+                      )}
+                      <Link href="/employer/vacancies" className="btn-secondary">
+                        Открыть
+                      </Link>
+                    </div>
                   </article>
                 ))}
               </div>
             )}
           </section>
 
-          {recentOffers.length > 0 && (
+          <section className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-ink-950/10 bg-white px-5 py-4">
+              <p className="text-sm text-ink-500">Новых подходящих специалистов</p>
+              <p className="mt-1 font-display text-3xl font-bold text-ink-900">{newMatches}</p>
+            </div>
+            <div className="rounded-xl border border-ink-950/10 bg-white px-5 py-4">
+              <p className="text-sm text-ink-500">Ожидают ответа</p>
+              <p className="mt-1 font-display text-3xl font-bold text-ink-900">{pendingOffers}</p>
+              <Link href="/employer/offers" className="mt-2 inline-block text-sm font-semibold text-brand-700">
+                Посмотреть предложения
+              </Link>
+            </div>
+          </section>
+
+          {offers.length > 0 && (
             <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-display text-lg font-bold">Недавние предложения</h3>
-                <Link href="/employer/offers" className="text-sm font-semibold text-brand-700">
-                  Все
-                </Link>
-              </div>
+              <h3 className="mb-3 font-display text-lg font-bold">Недавние предложения</h3>
               <div className="grid gap-2">
-                {recentOffers.map((o) => (
+                {offers.slice(0, 4).map((o) => (
                   <div key={o.id} className="card flex flex-wrap items-center justify-between gap-2 !py-3">
-                    <p className="text-sm">
-                      <strong>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
                         {o.candidate?.firstName} {o.candidate?.lastName}
-                      </strong>{' '}
-                      · {o.vacancy?.title}
-                    </p>
-                    <span className="badge bg-ink-50 text-ink-700">
-                      {o.status === 'PENDING' ? 'Ожидает' : o.status === 'ACCEPTED' ? 'Принято' : o.status === 'REJECTED' ? 'Отклонено' : 'Отозвано'}
-                    </span>
+                      </p>
+                      <p className="text-sm text-ink-600">{o.vacancy?.title}</p>
+                    </div>
+                    <span className="badge bg-ink-50 text-ink-700">{OFFER_STATUS_LABEL[o.status]}</span>
                   </div>
                 ))}
               </div>

@@ -22,6 +22,16 @@ export class SkillInputDto {
   @Min(1)
   @Max(5)
   level?: number;
+
+  @ApiPropertyOptional({ description: 'Внешний источник (например headhunter)' })
+  @IsOptional()
+  @IsString()
+  externalSource?: string;
+
+  @ApiPropertyOptional({ description: 'ID навыка во внешнем справочнике' })
+  @IsOptional()
+  @IsString()
+  externalId?: string;
 }
 
 export class ExperienceInputDto {
@@ -124,6 +134,21 @@ export class UpdateCandidateDto {
   @IsOptional()
   @IsString()
   fspParticipantId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  industryId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  specializationId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  candidateCategoryId?: string;
 
   @ApiPropertyOptional({ type: [SkillInputDto] })
   @IsOptional()

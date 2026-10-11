@@ -14,10 +14,18 @@ enum UserRole {
 }
 
 enum Grade {
+  INTERN
   JUNIOR
   MIDDLE
   SENIOR
   LEAD
+}
+
+enum ProfileStatus {
+  DRAFT
+  ASSESSMENT_REQUIRED
+  AVAILABLE
+  HIDDEN
 }
 
 enum WorkFormat {
@@ -31,6 +39,33 @@ enum OfferStatus {
   ACCEPTED
   REJECTED
   WITHDRAWN
+  EXPIRED
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  REVIEWING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ChallengeStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+enum FspAchievementSource {
+  FSP
+  DEMO
+}
+
+enum FspLinkStatus {
+  CONNECTED
+  NOT_FOUND
+  UNAVAILABLE
 }
 
 enum VacancyStatus {
@@ -46,24 +81,160 @@ enum ResumeStatus {
   FAILED
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  role         UserRole
-  firstName    String
-  lastName     String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
 
-  candidateProfile CandidateProfile?
-  company          Company?
-  offersSent       Offer[]            @relation("EmployerOffers")
-  offersReceived   Offer[]            @relation("CandidateOffers")
+enum QuestionDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+  CANCELLED
+}
+
+enum AssessmentResultStatus {
+  PASSED
+  FAILED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  role          UserRole
+  firstName     String
+  lastName      String
+  phone         String?
+  emailVerified Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  candidateProfile         CandidateProfile?
+  company                  Company?
+  offersSent               Offer[]                 @relation("EmployerOffers")
+  offersReceived           Offer[]                 @relation("CandidateOffers")
+  privacySettings          PrivacySettings?
+  auditLogs                AuditLog[]              @relation("AuditActor")
+  emailVerificationTokens  EmailVerificationToken[]
 
   @@index([role])
   @@index([email])
+  @@index([emailVerified])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+model Industry {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  specializations Specialization[]
+  candidates      CandidateProfile[]
+  vacancies       Vacancy[]
+  assessments     Assessment[]
+
+  @@index([isActive])
+}
+
+model Specialization {
+  id          String   @id @default(cuid())
+  industryId  String
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  industry   Industry            @relation(fields: [industryId], references: [id], onDelete: Cascade)
+  categories  CandidateCategory[]
+  candidates  CandidateProfile[]
+  vacancies   Vacancy[]
+  assessments Assessment[]
+  challenges  Challenge[]
+
+  @@index([industryId])
+  @@index([isActive])
+}
+
+model CandidateCategory {
+  id               String   @id @default(cuid())
+  specializationId String
+  grade            Grade
+  slug             String   @unique
+  name             String
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  specialization Specialization     @relation(fields: [specializationId], references: [id], onDelete: Cascade)
+  candidates     CandidateProfile[]
+
+  @@unique([specializationId, grade])
+  @@index([grade])
+  @@index([isActive])
+}
+
+model PrivacySettings {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  profileVisibility  String   @default("EMPLOYERS")
+  contactVisibility  String   @default("AFTER_ACCEPT")
+  consentVersion     String
+  consentAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String?
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 model Company {
@@ -83,45 +254,92 @@ model Company {
 }
 
 model CandidateProfile {
-  id              String     @id @default(cuid())
-  userId          String     @unique
-  roleTitle       String
-  grade           Grade
-  experienceYears Float      @default(0)
-  salaryFrom      Int?
-  salaryTo        Int?
-  workFormat      WorkFormat @default(REMOTE)
-  about           String?
-  city            String?
-  isVerified      Boolean    @default(false)
-  onboardingCompleted Boolean @default(false)
-  fspParticipantId String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                   String        @id @default(cuid())
+  userId               String        @unique
+  roleTitle            String
+  grade                Grade
+  experienceYears      Float         @default(0)
+  salaryFrom           Int?
+  salaryTo             Int?
+  workFormat           WorkFormat    @default(REMOTE)
+  about                String?
+  city                 String?
+  isVerified           Boolean       @default(false)
+  onboardingCompleted  Boolean       @default(false)
+  profileStatus        ProfileStatus @default(DRAFT)
+  industryId           String?
+  specializationId     String?
+  candidateCategoryId  String?
+  /// Self-declared grade remains in `grade`; assessment outcome stored here
+  recommendedGrade     Grade?
+  fspParticipantId     String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
-  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  skills       CandidateSkill[]
-  experiences  Experience[]
-  educations   Education[]
-  resumes      Resume[]
-  matches      Match[]
-  testAttempts TestAttempt[]
-  achievements FspAchievement[]
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  industry         Industry?          @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  specialization   Specialization?    @relation(fields: [specializationId], references: [id], onDelete: SetNull)
+  candidateCategory CandidateCategory? @relation(fields: [candidateCategoryId], references: [id], onDelete: SetNull)
+  skills           CandidateSkill[]
+  experiences      Experience[]
+  educations       Education[]
+  resumes          Resume[]
+  matches          Match[]
+  testAttempts     TestAttempt[]
+  achievements     FspAchievement[]
+  assessmentAttempts AssessmentAttempt[]
+  assessmentResults  AssessmentResult[]
+  applications       Application[]
+  challengeAttempts  ChallengeAttempt[]
 
   @@index([roleTitle])
   @@index([grade])
+  @@index([recommendedGrade])
   @@index([workFormat])
   @@index([fspParticipantId])
+  @@index([profileStatus])
+  @@index([industryId])
+  @@index([specializationId])
+  @@index([candidateCategoryId])
 }
 
 model Skill {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  category  String?
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  name           String   @unique
+  slug           String?  @unique
+  category       String?
+  aliases        String[] @default([])
+  externalSource String?
+  externalId     String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   candidates CandidateSkill[]
   vacancies  VacancySkill[]
+  challenges Challenge[]
+
+  @@unique([externalSource, externalId])
+  @@index([isActive])
+  @@index([category])
+}
+
+model City {
+  id             String   @id @default(cuid())
+  name           String
+  region         String?
+  country        String   @default("Россия")
+  aliases        String[] @default([])
+  externalSource String?
+  externalId     String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([name, country])
+  @@unique([externalSource, externalId])
+  @@index([isActive])
+  @@index([name])
 }
 
 model CandidateSkill {
@@ -167,31 +385,60 @@ model Education {
 }
 
 model Vacancy {
-  id              String        @id @default(cuid())
-  companyId       String
-  title           String
-  roleTitle       String
-  grade           Grade
-  experienceFrom  Float         @default(0)
-  experienceTo    Float?
-  salaryFrom      Int?
-  salaryTo        Int?
-  workFormat      WorkFormat    @default(REMOTE)
-  description     String?
-  requirements    String?
-  status          VacancyStatus @default(ACTIVE)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  companyId        String
+  title            String
+  roleTitle        String
+  grade            Grade
+  experienceFrom   Float         @default(0)
+  experienceTo     Float?
+  salaryFrom       Int?
+  salaryTo         Int?
+  workFormat       WorkFormat    @default(REMOTE)
+  description      String?
+  requirements     String?
+  status           VacancyStatus @default(ACTIVE)
+  industryId       String?
+  specializationId String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  skills   VacancySkill[]
-  matches  Match[]
-  offers   Offer[]
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  industry       Industry?       @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  specialization Specialization? @relation(fields: [specializationId], references: [id], onDelete: SetNull)
+  skills         VacancySkill[]
+  matches        Match[]
+  offers         Offer[]
+  applications   Application[]
 
   @@index([status])
   @@index([roleTitle])
   @@index([grade])
   @@index([companyId])
+  @@index([industryId])
+  @@index([specializationId])
+}
+
+/// Candidate self-apply to vacancy (Wave D.1). Active uniqueness enforced via partial index in migration.
+model Application {
+  id           String            @id @default(cuid())
+  candidateId  String
+  vacancyId    String
+  status       ApplicationStatus @default(SUBMITTED)
+  coverLetter  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  withdrawnAt  DateTime?
+  reviewedAt   DateTime?
+
+  candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancy   Vacancy          @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@index([vacancyId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([candidateId, vacancyId])
 }
 
 model VacancySkill {
@@ -264,19 +511,21 @@ model FspResult {
 }
 
 model FspAchievement {
-  id          String   @id @default(cuid())
+  id          String               @id @default(cuid())
   candidateId String
   title       String
   discipline  String
   place       Int?
   year        Int
   status      String
-  isDemo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  isDemo      Boolean              @default(true)
+  source      FspAchievementSource @default(DEMO)
+  createdAt   DateTime             @default(now())
 
   candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@index([candidateId])
+  @@index([source])
 }
 
 model Resume {
@@ -329,10 +578,18 @@ model Offer {
   companyId   String
   employerId  String
   candidateId String
+  /// Snapshot at send time (do not re-read from Vacancy for historical display)
+  title       String?
+  description String?
+  /// Legacy single salary; mirrored from salaryFrom when set
   salary      Int?
+  salaryFrom  Int?
+  salaryTo    Int?
+  currency    String      @default("RUB")
   workFormat  WorkFormat?
   message     String?
   status      OfferStatus @default(PENDING)
+  expiresAt   DateTime?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -344,6 +601,7 @@ model Offer {
   @@index([status])
   @@index([candidateId])
   @@index([employerId])
+  @@index([expiresAt])
 }
 
 model Test {
@@ -380,4 +638,286 @@ model TestAttempt {
   candidate CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@index([candidateId])
+}
+
+/// Production assessment engine (Wave C). Legacy Test* kept for backward compatibility.
+model Assessment {
+  id               String           @id @default(cuid())
+  name             String
+  description      String?
+  industryId       String
+  specializationId String
+  version          Int              @default(1)
+  status           AssessmentStatus @default(DRAFT)
+  timeLimitSeconds Int              @default(1800)
+  passingScore     Float            @default(50)
+  cooldownHours    Int              @default(72)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  industry       Industry                    @relation(fields: [industryId], references: [id], onDelete: Cascade)
+  specialization Specialization               @relation(fields: [specializationId], references: [id], onDelete: Cascade)
+  blueprints     AssessmentBlueprint[]
+  questions      AssessmentQuestion[]
+  thresholds     AssessmentGradeThreshold[]
+  attempts       AssessmentAttempt[]
+  results        AssessmentResult[]
+
+  @@index([status])
+  @@index([specializationId])
+  @@index([industryId])
+  @@unique([specializationId, version])
+}
+
+model AssessmentBlueprint {
+  id           String   @id @default(cuid())
+  assessmentId String
+  name         String
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assessment Assessment                   @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  sections   AssessmentBlueprintSection[]
+
+  @@index([assessmentId])
+}
+
+model AssessmentBlueprintSection {
+  id            String              @id @default(cuid())
+  blueprintId   String
+  skill         String
+  weight        Float
+  questionCount Int
+  difficulty    QuestionDifficulty?
+  required      Boolean             @default(true)
+
+  blueprint AssessmentBlueprint @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
+
+  @@index([blueprintId])
+  @@index([skill])
+}
+
+model AssessmentQuestion {
+  id                   String             @id @default(cuid())
+  assessmentId         String
+  skill                String
+  difficulty           QuestionDifficulty @default(MEDIUM)
+  type                 QuestionType       @default(SINGLE_CHOICE)
+  text                 String
+  options              String[]
+  correctOptionIndexes Int[]
+  explanation          String?
+  points               Float              @default(1)
+  isActive             Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  assessment Assessment                    @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  answers    AssessmentAnswer[]
+  attemptQs  AssessmentAttemptQuestion[]
+
+  @@index([assessmentId])
+  @@index([skill])
+  @@index([difficulty])
+  @@index([isActive])
+}
+
+model AssessmentGradeThreshold {
+  id           String @id @default(cuid())
+  assessmentId String
+  grade        Grade
+  minScore     Float
+  maxScore     Float
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, grade])
+  @@index([assessmentId])
+}
+
+model AssessmentAttempt {
+  id                String        @id @default(cuid())
+  candidateId       String
+  assessmentId      String
+  assessmentVersion Int
+  startedAt         DateTime      @default(now())
+  expiresAt         DateTime
+  submittedAt       DateTime?
+  status            AttemptStatus @default(IN_PROGRESS)
+  score             Float?
+  correctAnswers    Int?
+  totalQuestions    Int           @default(0)
+  recommendedGrade  Grade?
+  selfDeclaredGrade Grade?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  candidate  CandidateProfile             @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  assessment Assessment                   @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questions  AssessmentAttemptQuestion[]
+  answers    AssessmentAnswer[]
+  result     AssessmentResult?
+
+  @@index([candidateId])
+  @@index([assessmentId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model AssessmentAttemptQuestion {
+  id         String @id @default(cuid())
+  attemptId  String
+  questionId String
+  position   Int
+
+  attempt  AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+model AssessmentAnswer {
+  id                    String   @id @default(cuid())
+  attemptId             String
+  questionId            String
+  selectedOptionIndexes Int[]
+  isCorrect             Boolean?
+  answeredAt            DateTime @default(now())
+
+  attempt  AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+model AssessmentResult {
+  id                  String                  @id @default(cuid())
+  attemptId           String                  @unique
+  candidateId         String
+  assessmentId        String
+  assessmentVersion   Int
+  score               Float
+  status              AssessmentResultStatus
+  recommendedGrade    Grade
+  selfDeclaredGrade   Grade?
+  candidateCategoryId String?
+  sectionScores       Json
+  createdAt           DateTime                @default(now())
+
+  attempt    AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  candidate  CandidateProfile  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  assessment Assessment        @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@index([assessmentId])
+  @@index([status])
+}
+
+/// Regular challenges (Wave D.2) — separate from Assessment Engine categorization.
+model Challenge {
+  id               String             @id @default(cuid())
+  title            String
+  description      String?
+  specializationId String?
+  skillId          String?
+  difficulty       QuestionDifficulty @default(MEDIUM)
+  status           ChallengeStatus    @default(DRAFT)
+  timeLimitSeconds Int?
+  maxAttempts      Int                @default(1)
+  passingScore     Float              @default(70)
+  publishedAt      DateTime?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  specialization Specialization?     @relation(fields: [specializationId], references: [id], onDelete: SetNull)
+  skill          Skill?              @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  questions      ChallengeQuestion[]
+  attempts       ChallengeAttempt[]
+
+  @@index([status])
+  @@index([specializationId])
+  @@index([skillId])
+  @@index([publishedAt])
+  @@index([difficulty])
+}
+
+model ChallengeQuestion {
+  id                   String       @id @default(cuid())
+  challengeId          String
+  type                 QuestionType @default(SINGLE_CHOICE)
+  prompt               String
+  options              String[]
+  correctOptionIndexes Int[]
+  points               Float        @default(1)
+  sortOrder            Int          @default(0)
+  isActive             Boolean      @default(true)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  challenge Challenge                     @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  answers   ChallengeAnswer[]
+  attemptQs ChallengeAttemptQuestion[]
+
+  @@index([challengeId])
+  @@index([sortOrder])
+}
+
+model ChallengeAttempt {
+  id            String        @id @default(cuid())
+  challengeId   String
+  candidateId   String
+  status        AttemptStatus @default(IN_PROGRESS)
+  startedAt     DateTime      @default(now())
+  submittedAt   DateTime?
+  expiresAt     DateTime?
+  score         Float?
+  passed        Boolean?
+  attemptNumber Int           @default(1)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  challenge Challenge                   @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  candidate CandidateProfile            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  questions ChallengeAttemptQuestion[]
+  answers   ChallengeAnswer[]
+
+  @@index([candidateId])
+  @@index([challengeId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([candidateId, challengeId])
+}
+
+model ChallengeAttemptQuestion {
+  id         String @id @default(cuid())
+  attemptId  String
+  questionId String
+  position   Int
+
+  attempt  ChallengeAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question ChallengeQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+model ChallengeAnswer {
+  id                    String   @id @default(cuid())
+  attemptId             String
+  questionId            String
+  selectedOptionIndexes Int[]
+  isCorrect             Boolean?
+  answeredAt            DateTime @default(now())
+
+  attempt  ChallengeAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question ChallengeQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
 }

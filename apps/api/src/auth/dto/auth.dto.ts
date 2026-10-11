@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 
@@ -31,6 +31,10 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   companyName?: string;
+
+  @ApiProperty({ description: 'Согласие с политикой конфиденциальности' })
+  @IsBoolean({ message: 'Необходимо согласие с политикой конфиденциальности' })
+  consentAccepted: boolean;
 }
 
 export class LoginDto {

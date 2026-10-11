@@ -3,13 +3,17 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { EmptyState, ErrorBox, SiteHeader, SkillChips, SkeletonCards } from '@/components/ui';
+import { SearchableSelect } from '@/components/searchable-select';
 import { api } from '@/lib/api';
-import { experienceLabel, FORMAT_LABEL, formatSalaryShort, GRADE_LABEL, ROLE_OPTIONS, TECH_OPTIONS } from '@/lib/labels';
+import { dashboardPath, getStoredUser, type AuthUser } from '@/lib/auth';
+import { experienceLabel, FORMAT_LABEL, formatSalaryShort, GRADE_LABEL, ROLE_OPTIONS } from '@/lib/labels';
+import { optionFromValue, searchReferenceSkills } from '@/lib/reference';
 
 export default function SpecialistsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState({
     roleTitle: '',
@@ -21,6 +25,13 @@ export default function SpecialistsPage() {
   });
 
   async function load(next = filters) {
+    const u = getStoredUser();
+    if (!u || (u.role !== 'EMPLOYER' && u.role !== 'ADMIN')) {
+      setItems([]);
+      setLoading(false);
+      setError('');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -28,7 +39,7 @@ export default function SpecialistsPage() {
       Object.entries(next).forEach(([k, v]) => {
         if (v) qs.set(k, v);
       });
-      const res = await api(`/candidates?${qs.toString()}`, { auth: false });
+      const res = await api(`/candidates?${qs.toString()}`);
       setItems(res.items || []);
     } catch (e: any) {
       setError(e.message || 'Не удалось загрузить специалистов');
@@ -38,9 +49,13 @@ export default function SpecialistsPage() {
   }
 
   useEffect(() => {
+    const u = getStoredUser();
+    setUser(u);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const canBrowse = user?.role === 'EMPLOYER' || user?.role === 'ADMIN';
 
   return (
     <div className="min-h-screen">
@@ -48,8 +63,21 @@ export default function SpecialistsPage() {
       <main className="mx-auto max-w-6xl px-4 py-10 md:px-6">
         <h1 className="font-display text-3xl font-bold">Специалисты</h1>
         <p className="mt-2 text-ink-600">IT-профили с подтверждёнными достижениями ФСП.</p>
+        {!canBrowse && (
+          <div className="card mt-6">
+            <p className="text-sm text-ink-600">Каталог специалистов доступен работодателям после входа.</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link href="/login" className="btn-primary">
+                Войти
+              </Link>
+              <Link href="/register?role=EMPLOYER" className="btn-secondary">
+                Регистрация работодателя
+              </Link>
+            </div>
+          </div>
+        )}
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
+        {canBrowse && <div className="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
           <aside className="card h-fit space-y-3">
             <button type="button" className="btn-secondary w-full lg:hidden" onClick={() => setFiltersOpen((v) => !v)}>
               {filtersOpen ? 'Скрыть фильтры' : 'Фильтры'}
@@ -89,15 +117,14 @@ export default function SpecialistsPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Технология</label>
-                <select className="field" value={filters.skill} onChange={(e) => setFilters({ ...filters, skill: e.target.value })}>
-                  <option value="">Все</option>
-                  {TECH_OPTIONS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  label="Технология"
+                  placeholder="Все"
+                  searchPlaceholder="Поиск навыка..."
+                  value={filters.skill ? optionFromValue(filters.skill) : null}
+                  onChange={(opt) => setFilters({ ...filters, skill: opt?.value || '' })}
+                  onSearch={searchReferenceSkills}
+                />
               </div>
               <div>
                 <label className="label">Опыт от (лет)</label>
@@ -136,17 +163,36 @@ export default function SpecialistsPage() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       {c.isVerified && <span className="badge bg-brand-50 text-brand-800">✓ Подтверждённый профиль</span>}
                       {c.achievements?.length > 0 && (
-                        <span className="badge bg-amber-50 text-amber-800">🏆 {c.achievements.length} достижения ФСП</span>
+                        <span className="badge bg-brand-50 text-brand-800 ring-1 ring-brand-200">
+                          {c.achievements.length} достижения ФСП
+                        </span>
                       )}
                     </div>
-                    <Link href="/login" className="btn-primary mt-4">
-                      Войти, чтобы предложить вакансию
-                    </Link>
+                    {!user && (
+                      <Link href="/login" className="btn-primary mt-4">
+                        Войти, чтобы предложить вакансию
+                      </Link>
+                    )}
+                    {user?.role === 'EMPLOYER' && (
+                      <Link href="/employer/search" className="btn-primary mt-4">
+                        Предложить вакансию
+                      </Link>
+                    )}
+                    {user?.role === 'CANDIDATE' && (
+                      <Link href={dashboardPath('CANDIDATE')} className="btn-secondary mt-4">
+                        В кабинет
+                      </Link>
+                    )}
+                    {user?.role === 'ADMIN' && (
+                      <Link href={`/employer/candidates/${c.id}`} className="btn-primary mt-4">
+                        Открыть профиль
+                      </Link>
+                    )}
                   </article>
                 ))}
             </div>
           </div>
-        </div>
+        </div>}
       </main>
     </div>
   );

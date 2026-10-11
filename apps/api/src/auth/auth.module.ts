@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { EmailModule } from '../email/email.module';
 
 const jwtSecret = process.env.JWT_SECRET || 'dev_secret_change_me_local_only_32chars';
 
@@ -14,6 +15,7 @@ const jwtSecret = process.env.JWT_SECRET || 'dev_secret_change_me_local_only_32c
       secret: jwtSecret,
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     }),
+    EmailModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

@@ -21,4 +21,5 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/tsconfig.json ./tsconfig.json
 RUN mkdir -p uploads
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && if [ \"$SEED_ON_START\" = \"true\" ]; then npx prisma db seed; fi && node dist/main.js"]
+# Entry is dist/src/main.js because src imports prisma/taxonomy.ts (rootDir expands past src/)
+CMD ["sh", "-c", "npx prisma migrate deploy && if [ \"$SEED_ON_START\" = \"true\" ]; then npx prisma db seed; fi && node dist/src/main.js"]

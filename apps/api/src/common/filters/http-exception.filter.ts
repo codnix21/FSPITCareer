@@ -25,6 +25,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = RU_MESSAGES[500];
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -34,11 +35,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else if (typeof res === 'object' && res !== null) {
         const obj = res as Record<string, unknown>;
         message = (obj.message as string | string[]) || RU_MESSAGES[status] || RU_MESSAGES[500];
+        if (typeof obj.code === 'string') code = obj.code;
       }
     }
 
     response.status(status).json({
       statusCode: status,
+      ...(code ? { code } : {}),
       message,
       error: RU_MESSAGES[status] || 'Ошибка',
       timestamp: new Date().toISOString(),

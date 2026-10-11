@@ -29,6 +29,12 @@ export class OffersController {
     return this.offers.findAll(user);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Получить предложение' })
+  findOne(@Param('id') id: string, @CurrentUser() user: { id: string; role: UserRole }) {
+    return this.offers.findOne(id, user);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Обновить статус предложения' })
   update(

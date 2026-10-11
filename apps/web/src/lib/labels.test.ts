@@ -7,9 +7,9 @@ describe('UI labels', () => {
     expect(OFFER_STATUS_LABEL.ACCEPTED).toBe('Принято');
   });
 
-  it('грейды на русском', () => {
-    expect(GRADE_LABEL.MIDDLE).toBe('Мидл');
-    expect(GRADE_LABEL.SENIOR).toBe('Сеньор');
+  it('уровни специалистов', () => {
+    expect(GRADE_LABEL.MIDDLE).toBe('Middle');
+    expect(GRADE_LABEL.SENIOR).toBe('Senior');
   });
 
   it('форматирует опыт', () => {

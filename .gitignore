@@ -8,6 +8,8 @@ coverage/
 .env.local
 .env.*.local
 *.log
+dev-*.log
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 uploads/
@@ -23,6 +25,10 @@ venv/
 docker-data/
 prisma/*.db
 prisma/*.db-journal
+# Accidental tsc emit next to seed sources (keep *.ts)
+apps/api/prisma/*.js
+apps/api/prisma/*.js.map
+apps/api/prisma/*.d.ts
 apps/api/uploads/
 apps/web/out/
 .cache/

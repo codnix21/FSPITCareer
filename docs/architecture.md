@@ -4,40 +4,61 @@
 
 1. Один рабочий продукт важнее сложной микросервисной сети.
 2. Matching — отдельный модуль с явной формулой и объяснениями («Почему подходит»).
-3. FSP и ML подключаются через стабильные API; на MVP допустимы mock.
+3. ФСП и ML подключаются через стабильные API; на MVP допустимы демо/mock-режимы.
 
 ## Компоненты
 
 ```text
-Browser → Nginx → Next.js (web)
-                → NestJS (api) → PostgreSQL
-                               → Redis (rate limit / future cache)
-                               → ML service (semantic matching)
+Браузер → Nginx → Next.js (веб-интерфейс)
+                 → NestJS (API) → PostgreSQL
+                                → Redis (лимиты запросов / кэш)
+                                → ML-сервис (семантический matching)
 ```
 
 ## Доменные сущности
 
-- User / Role (CANDIDATE, EMPLOYER, ADMIN)
-- CandidateProfile, Skills, Experience, Education
-- Company, Vacancy
-- Match, Offer
-- FSP Participant / Achievements
-- Resume / ResumeAnalysis
-- Tests / Attempts
+- Пользователь / роли: соискатель, работодатель, администратор + подтверждение email
+- Отрасль / специализация / категория кандидата
+- Профиль кандидата, навыки, опыт, образование
+- Компания, вакансия
+- Соответствие (Match), предложение (Offer) — снимок зарплаты, срок действия
+- Отклик (Application) — самостоятельный отклик кандидата
+- Техническое тестирование (Assessment) + попытка / ответы / результат
+- Технические задания (Challenge) — отдельно от Assessment
+- Участник ФСП / достижения (`FspProvider`)
+- Резюме / анализ резюме
+- Журнал аудита / настройки приватности
+
+## Основной поток
+
+```text
+Регистрация → подтверждение email → онбординг → тест → категория → AVAILABLE
+  → вакансия / matching → оффер или отклик → раскрытие контактов
+
+Кандидат → технические задания → результат → краткая сводка для работодателя
+```
 
 ## Matching
 
-Модуль `apps/api/src/matching/matching.engine.ts` считает score 0–100.
+Модуль `apps/api/src/matching/matching.engine.ts` считает оценку 0–100.
 
-ML-сервис принимает `candidate_id` + `vacancy_id` и возвращает `similarity`.
-Если ML недоступен, API использует deterministic fallback на основе rule-based score.
+Веса (сумма = 1.0): роль 0.10, специализация 0.15, навыки 0.25, опыт 0.15,
+уровень 0.10, зарплата 0.10, формат работы 0.05, ФСП 0.05, тест 0.05.
+
+ML-сервис принимает идентификаторы кандидата и вакансии и возвращает similarity.
+Если ML недоступен, API использует детерминированный расчёт по правилам.
+
+## Справочники
+
+Подсказки навыков, должностей и городов идут через внешний провайдер (HeadHunter),
+а не из полного локального каталога. Подробности: [reference-providers.md](./reference-providers.md).
 
 ## Безопасность
 
 - bcrypt для паролей
 - JWT Bearer
 - RBAC через RolesGuard
-- ValidationPipe + DTO
-- Throttling на auth
-- CORS whitelist
-- секреты только в env
+- ValidationPipe и DTO
+- ограничение частоты запросов на auth
+- белый список CORS
+- секреты только в переменных окружения

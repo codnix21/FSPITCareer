@@ -3,8 +3,10 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell, ProgressBar, Spinner } from '@/components/ui';
+import { SearchableMultiSelect, SearchableSelect } from '@/components/searchable-select';
 import { api } from '@/lib/api';
 import { employerNav } from '@/lib/nav';
+import { optionFromValue, searchReferenceCities, searchReferenceSkills } from '@/lib/reference';
 
 const nav = employerNav;
 
@@ -109,10 +111,14 @@ export default function EmployerOnboardingPage() {
                     <label className="label">Сайт</label>
                     <input className="field" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://" />
                   </div>
-                  <div>
-                    <label className="label">Город</label>
-                    <input className="field" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-                  </div>
+                  <SearchableSelect
+                    label="Город"
+                    placeholder="Выберите город..."
+                    searchPlaceholder="Поиск города..."
+                    value={form.city ? optionFromValue(form.city) : null}
+                    onChange={(opt) => setForm({ ...form, city: opt?.value || '' })}
+                    onSearch={searchReferenceCities}
+                  />
                 </div>
               </>
             ) : (
@@ -123,22 +129,15 @@ export default function EmployerOnboardingPage() {
                   <label className="label">Название</label>
                   <input className="field" value={vacancy.title} onChange={(e) => setVacancy({ ...vacancy, title: e.target.value, roleTitle: e.target.value })} />
                 </div>
-                <div>
-                  <label className="label">Технологии (через запятую)</label>
-                  <input
-                    className="field"
-                    value={vacancy.technologies.join(', ')}
-                    onChange={(e) =>
-                      setVacancy({
-                        ...vacancy,
-                        technologies: e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                  />
-                </div>
+                <SearchableMultiSelect
+                  label="Технологии"
+                  placeholder="Начните вводить навык..."
+                  searchPlaceholder="Начните вводить навык..."
+                  idleHint="Начните вводить название навыка"
+                  value={vacancy.technologies.map((t) => optionFromValue(t))}
+                  onChange={(opts) => setVacancy({ ...vacancy, technologies: opts.map((o) => o.value) })}
+                  onSearch={searchReferenceSkills}
+                />
               </>
             )}
             <button type="submit" className="btn-primary" disabled={saving}>

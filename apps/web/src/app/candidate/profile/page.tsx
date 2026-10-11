@@ -1,27 +1,41 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { AppShell, ConfirmDialog, ErrorBox, Modal, ProgressBar, SkillChips, SkeletonCards, Spinner } from '@/components/ui';
+import { AppShell, ConfirmDialog, ErrorBox, ExpandableSkillChips, FspAchievements, InitialsAvatar, Modal, ProgressBar, SkeletonCards, Spinner } from '@/components/ui';
+import { SearchableSelect } from '@/components/searchable-select';
 import { api } from '@/lib/api';
 import {
   experienceLabel,
   FORMAT_LABEL,
   formatSalary,
   GRADE_LABEL,
-  ROLE_OPTIONS,
-  TECH_OPTIONS,
+  roleDisplay,
 } from '@/lib/labels';
 import { candidateNav } from '@/lib/nav';
+import {
+  optionFromValue,
+  searchEducationInstitutions,
+  searchReferenceCities,
+  searchReferenceCompanies,
+  searchReferenceEducation,
+  searchReferencePositions,
+  searchReferenceSkills,
+} from '@/lib/reference';
 
 const nav = candidateNav;
 
-type SkillRow = { name: string; level: number };
+type SkillRow = {
+  name: string;
+  level: number;
+  externalSource?: string;
+  externalId?: string | null;
+};
 type ExpRow = { company: string; position: string; description: string; startDate: string; endDate: string; isCurrent: boolean };
 type EduRow = { institution: string; degree: string; field: string; yearFrom: number; yearTo: number };
 
-const emptySkill: SkillRow = { name: 'Python', level: 3 };
+const emptySkill: SkillRow = { name: '', level: 3 };
 const emptyExp: ExpRow = { company: '', position: '', description: '', startDate: '2022-01-01', endDate: '', isCurrent: true };
-const emptyEdu: EduRow = { institution: '', degree: 'Бакалавр', field: '', yearFrom: 2018, yearTo: 2022 };
+const emptyEdu: EduRow = { institution: '', degree: 'Высшее', field: '', yearFrom: 2018, yearTo: 2022 };
 
 export default function CandidateProfilePage() {
   const [profile, setProfile] = useState<any>(null);
@@ -44,6 +58,12 @@ export default function CandidateProfilePage() {
     educations: [] as EduRow[],
   });
   const [resumeMsg, setResumeMsg] = useState('');
+  const [resumeAnalysis, setResumeAnalysis] = useState<{
+    role?: string;
+    experience?: string | number;
+    skills?: string[];
+    notice?: string;
+  } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [lastResumeId, setLastResumeId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -68,7 +88,12 @@ export default function CandidateProfilePage() {
         city: p.city || '',
         about: p.about || '',
         fspParticipantId: p.fspParticipantId || '',
-        skills: p.skills.map((s: any) => ({ name: s.skill.name, level: s.level })),
+        skills: p.skills.map((s: any) => ({
+          name: s.skill.name,
+          level: s.level,
+          externalSource: s.skill.externalSource || undefined,
+          externalId: s.skill.externalId || undefined,
+        })),
         experiences: (p.experiences || []).map((e: any) => ({
           company: e.company,
           position: e.position,
@@ -137,21 +162,26 @@ export default function CandidateProfilePage() {
 
   async function onUpload(file: File) {
     setResumeMsg('Резюме загружено');
+    setResumeAnalysis(null);
     setAnalyzing(true);
     setLastResumeId(null);
     try {
       const fd = new FormData();
       fd.append('file', file);
       const uploaded = await api('/resumes/upload', { method: 'POST', body: fd });
-      setResumeMsg('Резюме загружено\nАнализ профиля...');
+      setResumeMsg('Резюме проанализировано');
       const analyzed = await api(`/resumes/${uploaded.id}/analyze`, { method: 'POST' });
       setLastResumeId(uploaded.id);
-      setResumeMsg(
-        `Резюме загружено\n\nАнализ профиля...\n\nНайдено:\nРоль: ${analyzed.found.role}\nОпыт: ${analyzed.found.experience}\n\nНавыки:\n${analyzed.found.skills.join('\n')}\n\n(${analyzed.notice})`,
-      );
+      setResumeAnalysis({
+        role: analyzed.found?.role,
+        experience: analyzed.found?.experience,
+        skills: analyzed.found?.skills || [],
+        notice: analyzed.notice || 'Демонстрационный анализ',
+      });
       await load();
     } catch (e: any) {
       setResumeMsg(e.message || 'Не удалось обработать резюме');
+      setResumeAnalysis(null);
     } finally {
       setAnalyzing(false);
     }
@@ -180,91 +210,134 @@ export default function CandidateProfilePage() {
       {profile && !loading && (
         <div className="space-y-5">
           <section className="card">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="font-display text-2xl font-bold">
+            <div className="flex flex-wrap items-start gap-4">
+              <InitialsAvatar firstName={profile.user.firstName} lastName={profile.user.lastName} size="lg" />
+              <div className="min-w-0 flex-1">
+                <h2 className="font-display text-2xl font-bold tracking-tight text-ink-950 md:text-3xl">
                   {profile.user.firstName} {profile.user.lastName}
                 </h2>
-                <p className="mt-1 text-ink-600">{profile.roleTitle}</p>
-                <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                  <span className="badge bg-ink-50">{GRADE_LABEL[profile.grade]}</span>
-                  <span className="badge bg-ink-50">{experienceLabel(profile.experienceYears)}</span>
-                  <span className="badge bg-ink-50">{FORMAT_LABEL[profile.workFormat]}</span>
-                  <span className="badge bg-ink-50">{formatSalary(profile.salaryFrom, profile.salaryTo)}</span>
-                </div>
+                <p className="mt-1 text-base text-ink-700">
+                  {profile.candidateCategory?.name ||
+                    (profile.specialization?.name
+                      ? `${profile.specialization.name} · ${GRADE_LABEL[profile.grade] || profile.grade}`
+                      : `${roleDisplay(profile.roleTitle)} · ${GRADE_LABEL[profile.grade]}`)}
+                </p>
+                <p className="meta-row mt-3">
+                  {profile.industry?.name ? <span>Отрасль: {profile.industry.name}</span> : null}
+                  {profile.specialization?.name ? <span>Специализация: {profile.specialization.name}</span> : null}
+                  <span>{experienceLabel(profile.experienceYears)}</span>
+                  {profile.city ? <span>{profile.city}</span> : null}
+                  <span>{FORMAT_LABEL[profile.workFormat]}</span>
+                  <span>{formatSalary(profile.salaryFrom, profile.salaryTo)}</span>
+                </p>
                 {profile.isVerified && (
                   <p className="mt-3">
-                    <span className="badge bg-brand-50 text-brand-800">✓ Профиль подтверждён</span>
+                    <span className="badge bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200">Профиль подтверждён</span>
                   </p>
                 )}
               </div>
             </div>
+            {profile.about && <p className="mt-5 text-sm leading-relaxed text-ink-600">{profile.about}</p>}
           </section>
 
-          <section className="card">
-            <h3 className="font-semibold">Навыки</h3>
+          <section className="card" id="skills">
+            <h3 className="section-title">Ключевые навыки</h3>
             <div className="mt-3">
-              <SkillChips skills={profile.skills.map((s: any) => `${s.skill.name} · ${s.level}/5`)} />
+              <ExpandableSkillChips
+                skills={(profile.skills || []).map((s: any) => ({ name: s.skill.name, level: s.level }))}
+                limit={5}
+              />
             </div>
           </section>
 
+          <div id="achievements">
+            <FspAchievements achievements={profile.achievements || []} />
+          </div>
+
           <section className="card">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-semibold">Достижения ФСП</h3>
-              <span className="badge bg-brand-50 text-brand-800">Подтверждено ФСП</span>
-            </div>
-            {profile.achievements?.length ? (
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {profile.achievements.map((a: any) => (
-                  <article key={a.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-4">
-                    <p className="font-semibold">🏆 {a.title}</p>
-                    <p className="mt-2 text-sm">Дисциплина: {a.discipline}</p>
-                    <p className="text-sm">Результат: {a.place} место</p>
-                    <p className="text-sm">Год: {a.year}</p>
-                    <p className="text-sm">Статус: {a.status}</p>
-                  </article>
+            <h3 className="section-title">Техническое тестирование</h3>
+            {profile.assessment?.latest ? (
+              <div className="mt-3 space-y-2 text-sm">
+                <p>
+                  Статус: {profile.assessment.status === 'PASSED' ? 'Пройдено' : 'Не пройдено'} ·{' '}
+                  {profile.assessment.latest.score}/100
+                </p>
+                <p>
+                  Заявленный уровень: {GRADE_LABEL[profile.grade] || profile.grade}
+                </p>
+                <p>
+                  Рекомендуемый уровень:{' '}
+                  {GRADE_LABEL[profile.assessment.latest.recommendedGrade] ||
+                    profile.assessment.latest.recommendedGrade}
+                </p>
+                {profile.candidateCategory?.name && (
+                  <p>Категория специалиста: {profile.candidateCategory.name}</p>
+                )}
+                <ProgressBar value={profile.assessment.latest.score} />
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-ink-500">
+                Результатов пока нет — пройдите тест в разделе «Техническое тестирование»
+              </p>
+            )}
+          </section>
+
+          <section className="card" id="resume">
+            <h3 className="section-title">Резюме</h3>
+            {profile.resumes?.length && !analyzing && !resumeAnalysis ? (
+              <div className="mt-3 space-y-2">
+                {profile.resumes.map((r: any) => (
+                  <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] bg-ink-50 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-medium text-ink-900">{r.originalName || 'Файл резюме'}</p>
+                      <p className="text-xs text-ink-500">
+                        {r.createdAt ? new Date(r.createdAt).toLocaleDateString('ru-RU') : 'Загружено'}
+                        {r.analysis ? ' · проанализировано' : ''}
+                      </p>
+                    </div>
+                    <label className="btn-secondary !min-h-10 cursor-pointer !px-3 !py-2 text-xs">
+                      Заменить
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
+                      />
+                    </label>
+                  </div>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-ink-500">Нет достижений</p>
+              <>
+                <p className="mt-2 text-sm text-ink-500">Резюме ещё не загружено.</p>
+                <label className="btn-secondary mt-4 inline-flex cursor-pointer">
+                  Загрузить PDF или DOCX
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    disabled={analyzing}
+                    onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
+                  />
+                </label>
+              </>
             )}
-          </section>
-
-          <section className="card">
-            <h3 className="font-semibold">Результаты тестирования</h3>
-            {profile.testAttempts?.length ? (
-              <ul className="mt-3 space-y-3">
-                {profile.testAttempts.map((t: any) => (
-                  <li key={t.id}>
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span>{t.test?.title || 'Тест'}</span>
-                      <span className="font-semibold">
-                        {t.score}/{t.maxScore}
-                      </span>
-                    </div>
-                    <ProgressBar value={t.score} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-ink-500">Результатов пока нет — пройдите тест в разделе «Тесты»</p>
+            {analyzing && <Spinner label="Анализ резюме" />}
+            {resumeMsg && <p className="mt-3 text-sm font-medium text-ink-800">{resumeMsg}</p>}
+            {resumeAnalysis && (
+              <div className="mt-3 space-y-2 rounded-xl bg-ink-50 p-4 text-sm">
+                <p>
+                  <strong>Роль:</strong> {resumeAnalysis.role || '—'}
+                </p>
+                <p>
+                  <strong>Опыт:</strong> {resumeAnalysis.experience ?? '—'}
+                </p>
+                <p>
+                  <strong>Навыки:</strong> {(resumeAnalysis.skills || []).join(', ') || '—'}
+                </p>
+                <p className="text-xs text-ink-500">{resumeAnalysis.notice || 'Демонстрационный анализ'}</p>
+              </div>
             )}
-          </section>
-
-          <section className="card">
-            <h3 className="font-semibold">Загрузить резюме</h3>
-            <p className="mt-1 text-sm text-ink-500">
-              PDF или DOCX. После загрузки система извлечёт роль, опыт и навыки — проверьте и примените к профилю.
-            </p>
-            <input
-              className="mt-3 block w-full text-sm"
-              type="file"
-              accept=".pdf,.doc,.docx"
-              disabled={analyzing}
-              onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
-            />
-            {analyzing && <Spinner label="Анализ профиля" />}
-            {resumeMsg && <pre className="mt-4 whitespace-pre-wrap rounded-xl bg-ink-50 p-4 text-sm text-ink-700">{resumeMsg}</pre>}
             {lastResumeId && (
               <button type="button" className="btn-primary mt-3" disabled={applying} onClick={applyResume}>
                 {applying ? 'Применение…' : 'Применить к профилю'}
@@ -272,17 +345,68 @@ export default function CandidateProfilePage() {
             )}
           </section>
 
-          <form onSubmit={save} className="card space-y-4">
-            <h3 className="font-semibold">Редактировать профиль</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="label">Роль</label>
-                <select className="field" value={form.roleTitle} onChange={(e) => setForm({ ...form, roleTitle: e.target.value })}>
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r}>{r}</option>
+          {(profile.experiences?.length > 0 || true) && (
+            <section className="card">
+              <h3 className="section-title">Опыт работы</h3>
+              {profile.experiences?.length ? (
+                <ul className="mt-4 space-y-0">
+                  {profile.experiences.map((exp: any, i: number) => (
+                    <li key={exp.id || i} className="relative border-l border-ink-200 pb-6 pl-5 last:pb-0">
+                      <span className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-brand-600" />
+                      <p className="font-medium text-ink-950">{exp.position}</p>
+                      <p className="text-sm text-ink-600">{exp.company}</p>
+                      <p className="mt-1 text-xs text-ink-400">
+                        {exp.startDate ? new Date(exp.startDate).getFullYear() : '—'}
+                        {' — '}
+                        {exp.isCurrent || !exp.endDate ? 'настоящее время' : new Date(exp.endDate).getFullYear()}
+                      </p>
+                      {exp.description && <p className="mt-2 text-sm text-ink-600">{exp.description}</p>}
+                    </li>
                   ))}
-                </select>
-              </div>
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-ink-500">Опыт не указан</p>
+              )}
+            </section>
+          )}
+
+          <section className="card">
+            <h3 className="section-title">Образование</h3>
+            {profile.educations?.length ? (
+              <ul className="mt-4 space-y-4">
+                {profile.educations.map((ed: any, i: number) => (
+                  <li key={ed.id || i}>
+                    <p className="font-medium text-ink-950">{ed.institution}</p>
+                    <p className="text-sm text-ink-600">
+                      {[ed.degree, ed.field].filter(Boolean).join(' · ')}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-400">
+                      {ed.yearFrom}–{ed.yearTo}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-ink-500">Образование не указано</p>
+            )}
+          </section>
+
+          <form onSubmit={save} className="card space-y-6">
+            <h3 className="section-title">Редактировать профиль</h3>
+
+            <div>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-400">Основная информация</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <SearchableSelect
+                label="Роль"
+                placeholder="Выберите должность..."
+                searchPlaceholder="Поиск должности..."
+                value={optionFromValue(form.roleTitle, roleDisplay(form.roleTitle))}
+                onChange={(opt) => opt && setForm({ ...form, roleTitle: opt.value })}
+                onSearch={searchReferencePositions}
+              />
+            </div>
               <div>
                 <label className="label">Грейд</label>
                 <select className="field" value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>
@@ -316,8 +440,14 @@ export default function CandidateProfilePage() {
                 <input className="field" type="number" value={form.salaryTo} onChange={(e) => setForm({ ...form, salaryTo: Number(e.target.value) })} />
               </div>
               <div>
-                <label className="label">Город</label>
-                <input className="field" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+                <SearchableSelect
+                  label="Город"
+                  placeholder="Выберите город..."
+                  searchPlaceholder="Поиск города..."
+                  value={form.city ? optionFromValue(form.city) : null}
+                  onChange={(opt) => setForm({ ...form, city: opt?.value || '' })}
+                  onSearch={searchReferenceCities}
+                />
               </div>
               <div>
                 <label className="label">ID участника ФСП</label>
@@ -329,40 +459,45 @@ export default function CandidateProfilePage() {
                 </div>
               </div>
             </div>
+            </div>
 
             <div>
-              <label className="label">О себе</label>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-400">О себе</p>
               <textarea className="field min-h-24" value={form.about} onChange={(e) => setForm({ ...form, about: e.target.value })} />
             </div>
 
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <label className="label !mb-0">Навыки</label>
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Навыки</p>
                 <button type="button" className="btn-secondary !py-1.5" onClick={() => setSkillModal({ index: null, draft: { ...emptySkill } })}>
-                  Добавить
+                  + Добавить навык
                 </button>
               </div>
               {form.skills.length === 0 ? (
                 <p className="text-sm text-ink-500">Навыки ещё не добавлены.</p>
               ) : (
-                <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
                   {form.skills.map((s, i) => (
-                    <div key={`${s.name}-${i}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-950/10 bg-ink-50 px-3 py-2">
-                      <p className="text-sm font-medium">
-                        {s.name} · уровень {s.level}/5
-                      </p>
-                      <div className="flex gap-2">
-                        <button type="button" className="btn-ghost !py-1 !px-2" onClick={() => setSkillModal({ index: i, draft: { ...s } })}>
-                          Изменить
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-ghost !py-1 !px-2 text-red-700"
-                          onClick={() => setRemoveTarget({ kind: 'skill', index: i, label: s.name })}
-                        >
-                          Удалить
-                        </button>
-                      </div>
+                    <div
+                      key={`${s.name}-${i}`}
+                      className="inline-flex items-center gap-1.5 rounded-[10px] bg-ink-50 px-2.5 py-1.5 text-sm ring-1 ring-ink-950/10"
+                    >
+                      <button
+                        type="button"
+                        className="font-medium text-ink-900 hover:text-brand-700"
+                        onClick={() => setSkillModal({ index: i, draft: { ...s } })}
+                        title="Изменить"
+                      >
+                        {s.name} · {s.level}/5
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-ink-400 hover:bg-white hover:text-red-600"
+                        aria-label={`Удалить ${s.name}`}
+                        onClick={() => setRemoveTarget({ kind: 'skill', index: i, label: s.name })}
+                      >
+                        ×
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -462,6 +597,7 @@ export default function CandidateProfilePage() {
       <Modal
         open={!!skillModal}
         title={skillModal?.index == null ? 'Новый навык' : 'Изменить навык'}
+        description="Выберите навык из каталога и укажите уровень владения."
         onClose={() => setSkillModal(null)}
       >
         {skillModal && (
@@ -477,19 +613,26 @@ export default function CandidateProfilePage() {
             }}
           >
             <div>
-              <label className="label">Навык</label>
-              <input
-                className="field"
-                list="tech-list"
-                required
-                value={skillModal.draft.name}
-                onChange={(e) => setSkillModal({ ...skillModal, draft: { ...skillModal.draft, name: e.target.value } })}
+              <SearchableSelect
+                label="Навык"
+                placeholder="Выберите навык..."
+                searchPlaceholder="Начните вводить навык..."
+                idleHint="Начните вводить название навыка"
+                emptyText="Навык не найден"
+                value={skillModal.draft.name ? optionFromValue(skillModal.draft.name) : null}
+                onChange={(opt) =>
+                  setSkillModal({
+                    ...skillModal,
+                    draft: {
+                      ...skillModal.draft,
+                      name: opt?.value || '',
+                      externalSource: (opt?.meta?.source as string) || undefined,
+                      externalId: (opt?.meta?.externalId as string | null) ?? undefined,
+                    },
+                  })
+                }
+                onSearch={searchReferenceSkills}
               />
-              <datalist id="tech-list">
-                {TECH_OPTIONS.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
             </div>
             <div>
               <label className="label">Уровень (1–5)</label>
@@ -507,8 +650,8 @@ export default function CandidateProfilePage() {
               <button type="button" className="btn-secondary flex-1" onClick={() => setSkillModal(null)}>
                 Отмена
               </button>
-              <button type="submit" className="btn-primary flex-1">
-                Сохранить
+              <button type="submit" className="btn-primary flex-1" disabled={!skillModal.draft.name}>
+                {skillModal.index == null ? 'Добавить навык' : 'Сохранить'}
               </button>
             </div>
           </form>
@@ -530,21 +673,40 @@ export default function CandidateProfilePage() {
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="label">Компания</label>
-                <input
-                  className="field"
-                  required
-                  value={expModal.draft.company}
-                  onChange={(e) => setExpModal({ ...expModal, draft: { ...expModal.draft, company: e.target.value } })}
+                <SearchableSelect
+                  label="Компания"
+                  placeholder="Выберите компанию..."
+                  searchPlaceholder="Поиск компании..."
+                  value={expModal.draft.company ? optionFromValue(expModal.draft.company) : null}
+                  onChange={(opt) =>
+                    setExpModal({
+                      ...expModal,
+                      draft: { ...expModal.draft, company: opt?.value || expModal.draft.company },
+                    })
+                  }
+                  onSearch={async (q) => {
+                    const fromDb = await searchReferenceCompanies(q);
+                    if (q.trim() && !fromDb.some((x) => x.value.toLowerCase() === q.trim().toLowerCase())) {
+                      return [...fromDb, optionFromValue(q.trim())];
+                    }
+                    return fromDb;
+                  }}
                 />
+                <p className="mt-1 text-xs text-ink-500">Можно выбрать из списка или оставить введённое название</p>
               </div>
               <div>
-                <label className="label">Должность</label>
-                <input
-                  className="field"
-                  required
-                  value={expModal.draft.position}
-                  onChange={(e) => setExpModal({ ...expModal, draft: { ...expModal.draft, position: e.target.value } })}
+                <SearchableSelect
+                  label="Должность"
+                  placeholder="Выберите должность..."
+                  searchPlaceholder="Поиск должности..."
+                  value={expModal.draft.position ? optionFromValue(expModal.draft.position, roleDisplay(expModal.draft.position)) : null}
+                  onChange={(opt) =>
+                    setExpModal({
+                      ...expModal,
+                      draft: { ...expModal.draft, position: opt?.value || '' },
+                    })
+                  }
+                  onSearch={searchReferencePositions}
                 />
               </div>
             </div>
@@ -617,21 +779,36 @@ export default function CandidateProfilePage() {
             }}
           >
             <div>
-              <label className="label">Учебное заведение</label>
-              <input
-                className="field"
-                required
-                value={eduModal.draft.institution}
-                onChange={(e) => setEduModal({ ...eduModal, draft: { ...eduModal.draft, institution: e.target.value } })}
+              <SearchableSelect
+                label="Учебное заведение"
+                placeholder="Начните вводить вуз..."
+                searchPlaceholder="Начните вводить учебное заведение..."
+                idleHint="Начните вводить название учебного заведения"
+                value={eduModal.draft.institution ? optionFromValue(eduModal.draft.institution) : null}
+                onChange={(opt) =>
+                  setEduModal({
+                    ...eduModal,
+                    draft: { ...eduModal.draft, institution: opt?.value || '' },
+                  })
+                }
+                onSearch={searchEducationInstitutions}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Степень</label>
-                <input
-                  className="field"
-                  value={eduModal.draft.degree}
-                  onChange={(e) => setEduModal({ ...eduModal, draft: { ...eduModal.draft, degree: e.target.value } })}
+                <SearchableSelect
+                  label="Уровень образования"
+                  placeholder="Выберите уровень..."
+                  searchPlaceholder="Поиск уровня образования..."
+                  minQueryLength={0}
+                  value={eduModal.draft.degree ? optionFromValue(eduModal.draft.degree) : null}
+                  onChange={(opt) =>
+                    setEduModal({
+                      ...eduModal,
+                      draft: { ...eduModal.draft, degree: opt?.value || '' },
+                    })
+                  }
+                  onSearch={searchReferenceEducation}
                 />
               </div>
               <div>

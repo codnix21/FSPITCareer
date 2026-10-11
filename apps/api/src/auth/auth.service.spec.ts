@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { AuditService } from '../privacy/audit.service';
+import { EmailVerificationService } from '../email/email-verification.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -13,6 +15,14 @@ describe('AuthService', () => {
     },
   };
   const jwt = { sign: jest.fn().mockReturnValue('token') };
+  const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const emailVerification = {
+    issueToken: jest.fn().mockResolvedValue({ expiresAt: new Date() }),
+    verifyToken: jest.fn(),
+    resend: jest.fn(),
+    resendByEmail: jest.fn(),
+    assertVerified: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -21,6 +31,8 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwt },
+        { provide: AuditService, useValue: audit },
+        { provide: EmailVerificationService, useValue: emailVerification },
       ],
     }).compile();
     service = module.get(AuthService);
@@ -42,6 +54,7 @@ describe('AuthService', () => {
       firstName: 'Иван',
       lastName: 'Петров',
       role: 'CANDIDATE' as any,
+      consentAccepted: true,
     });
     expect(res.accessToken).toBe('token');
   });
@@ -55,6 +68,7 @@ describe('AuthService', () => {
         firstName: 'Иван',
         lastName: 'Петров',
         role: 'CANDIDATE' as any,
+        consentAccepted: true,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });

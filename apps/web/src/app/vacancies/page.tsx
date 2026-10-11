@@ -4,14 +4,17 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { EmptyState, ErrorBox, SiteHeader, SkillChips, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
+import { dashboardPath, getStoredUser, type AuthUser } from '@/lib/auth';
 import { FORMAT_LABEL, formatSalary, GRADE_LABEL } from '@/lib/labels';
 
 export default function VacanciesPublicPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
+    setUser(getStoredUser());
     (async () => {
       try {
         const res = await api('/vacancies?status=ACTIVE', { auth: false });
@@ -27,7 +30,7 @@ export default function VacanciesPublicPage() {
   return (
     <div className="min-h-screen">
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-4 py-10 md:px-6">
+      <main className="mx-auto max-w-content px-4 py-10 md:px-6">
         <h1 className="font-display text-3xl font-bold">Вакансии</h1>
         <p className="mt-2 text-ink-600">Актуальные запросы работодателей на платформе.</p>
         {loading && <Spinner />}
@@ -48,9 +51,26 @@ export default function VacanciesPublicPage() {
                 <Link href={`/vacancies/${v.id}`} className="btn-primary">
                   Подробнее
                 </Link>
-                <Link href="/register" className="btn-secondary">
-                  Создать профиль
-                </Link>
+                {!user && (
+                  <Link href="/register?role=CANDIDATE" className="btn-secondary">
+                    Создать профиль
+                  </Link>
+                )}
+                {user?.role === 'CANDIDATE' && (
+                  <Link href="/candidate/dashboard" className="btn-secondary">
+                    В кабинет
+                  </Link>
+                )}
+                {user?.role === 'EMPLOYER' && (
+                  <Link href="/employer/search" className="btn-secondary">
+                    Найти специалистов
+                  </Link>
+                )}
+                {user?.role === 'ADMIN' && (
+                  <Link href={dashboardPath('ADMIN')} className="btn-secondary">
+                    В кабинет
+                  </Link>
+                )}
               </div>
             </article>
           ))}

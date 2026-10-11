@@ -2,10 +2,14 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException 
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmitTestDto } from './dto/test.dto';
 import { UserRole } from '@prisma/client';
+import { AuditAction, AuditService } from '../privacy/audit.service';
 
 @Injectable()
 export class TestsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async list() {
     const items = await this.prisma.test.findMany({
@@ -52,7 +56,6 @@ export class TestsService {
     test.questions.forEach((q, i) => {
       if (dto.answers[i] === q.answer) correct++;
     });
-    const maxScore = test.questions.length * 100;
     const score = Math.round((correct / test.questions.length) * 100);
 
     const attempt = await this.prisma.testAttempt.create({
@@ -62,7 +65,15 @@ export class TestsService {
         score,
         maxScore: 100,
       },
-      include: { test: true },
+      include: { test: { select: { id: true, title: true } } },
+    });
+
+    await this.audit.log({
+      actorUserId: user.id,
+      action: AuditAction.ASSESSMENT_COMPLETED,
+      entityType: 'TestAttempt',
+      entityId: attempt.id,
+      metadata: { testId, score, candidateProfileId: profile.id },
     });
 
     return {
@@ -71,7 +82,13 @@ export class TestsService {
       maxScore: 100,
       correct,
       total: test.questions.length,
-      attempt,
+      attempt: {
+        id: attempt.id,
+        score: attempt.score,
+        maxScore: attempt.maxScore,
+        completedAt: attempt.completedAt,
+        test: attempt.test,
+      },
     };
   }
 

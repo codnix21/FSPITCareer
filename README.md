@@ -101,37 +101,40 @@ npm run dev
 - [ ] Бэкапы Postgres и том `uploads`
 - [ ] Мониторинг `/api/health`
 
-## Главный сценарий продукта
+## Главный сценарий продукта (demo)
 
-1. Зарегистрировать работодателя → онбординг компании → вакансия
-2. **Поиск** по требованиям → открыть профиль → отправить предложение
-3. Соискатель принимает или отклоняет в кабинете
+**Соискатель:** регистрация → подтверждение email → онбординг (специализация, грейд, навыки) → Assessment → категория → AVAILABLE → отклик / Challenges → оффер.
+
+**Работодатель:** вход → компания → вакансия (специализация, навыки, опыт, грейд, зарплата, формат) → matching → профиль → оффер / отклики → контакт по политике ContactReveal.
 
 ### Реализовано
 
-- Онбординг соискателя и работодателя
-- Полный профиль кандидата, резюме с применением к профилю
-- Профиль компании и публичная страница `/companies/:id`
-- Тесты компетенций, уведомления, офферы
-- Matching + semantic blend, Redis rate limit
-- Админ: пользователи, CSV, закрытие вакансий
-- Настройки аккаунта, восстановление пароля (UI), legal pages
-- Security headers, Helmet, healthcheck, fail-fast JWT в prod
-- Поиск по вакансии, редактирование вакансий, грейды/статусы на русском
+- Онбординг соискателя и работодателя, email verification, taxonomy (industry / specialization / category)
+- Assessment Engine (server-side scoring, cooldown, ownership)
+- Matching с объяснениями + semantic blend (ML fallback)
+- Applications (self-apply), Offers (snapshot, expiration), Contact reveal
+- Challenges (регулярные задания, без code execution)
+- FSP через `FspProvider` (local demo / external UNAVAILABLE без URL)
+- Privacy / RBAC / audit, Redis rate limit, Helmet, healthcheck
+- Админ API, справочники, резюме, русскоязычный UI
 
 ## Matching
 
-Веса:
+Формула: `score = 100 * Σ(signal_i * weight_i)`. Веса (сумма = 1.00):
 
-- roleMatch 25%
-- skillsMatch 30%
-- experienceMatch 15%
-- gradeMatch 10%
-- salaryMatch 10%
-- workFormatMatch 5%
-- fspMatch 5%
+| Signal | Weight |
+|--------|--------|
+| roleMatch | 0.10 |
+| specializationMatch | 0.15 |
+| skillsMatch | 0.25 |
+| experienceMatch | 0.15 |
+| gradeMatch | 0.10 |
+| salaryMatch | 0.10 |
+| workFormatMatch | 0.05 |
+| fspMatch | 0.05 |
+| assessmentMatch | 0.05 |
 
-Показатель означает соответствие требованиям вакансии, а не «ценность» человека.
+Показатель означает соответствие требованиям вакансии, а не «ценность» человека. Источник истины: `apps/api/src/matching/matching.engine.ts`.
 
 ## Интеграции
 
@@ -141,22 +144,24 @@ npm run dev
 ## Основные URL UI
 
 - `/` — лендинг
-- `/login`, `/register`, `/forgot-password`
+- `/login`, `/register`, `/forgot-password`, `/verify-email`
 - `/privacy`, `/terms`, `/support`
-- `/employer/*`, `/candidate/*`, `/admin`
-- `/vacancies`, `/specialists`
+- `/employer/*` (search, vacancies, applications, offers, company)
+- `/candidate/*` (dashboard, profile, tests, challenges, applications)
+- `/admin`, `/vacancies`, `/specialists`
 
 ## API (кратко)
 
 - `GET /api/health`
-- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/change-password`
-- `GET/PUT /api/candidates/:id`
+- `POST /api/auth/register`, `POST /api/auth/login`, email verify/resend
+- `GET/PUT /api/candidates/:id`, contact reveal
 - `GET/POST/PUT /api/vacancies`
 - `POST /api/matching/search`
-- `POST/GET/PATCH /api/offers`
-- `POST /api/resumes/upload`, `POST /api/resumes/:id/analyze`, `POST /api/resumes/:id/apply`
+- `POST/GET/PATCH /api/offers`, `/api/applications`
+- `/api/assessments/*`, `/api/challenges/*`
+- `POST /api/resumes/upload`, analyze, apply
 
-Документация Swagger: `/api/docs` (если включена).
+Документация Swagger: `/api/docs` (если `SWAGGER_ENABLED=true`). Финальный аудит: `docs/final-production-audit.md`.
 
 ## Переменные окружения
 
@@ -173,6 +178,13 @@ set E2E_DATABASE_URL=1
 set E2E_API_URL=http://localhost:3001/api
 npm run test:e2e
 ```
+
+## Сопроводительная документация
+
+Обязательный комплект для сдачи: **[docs/soprovoditelnaya-dokumentaciya.md](docs/soprovoditelnaya-dokumentaciya.md)**  
+(архитектура, тестирование, matching/категоризация, валидация, ФСП, API, версии, запуск).
+
+Дополнительно: `docs/architecture.md`, `docs/api.md`, `docs/deployment.md`, `docs/assessment-engine.md`, `docs/categorization.md`, `docs/final-production-audit.md`.
 
 ## Deployment
 
