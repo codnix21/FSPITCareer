@@ -13,6 +13,8 @@ docker compose up -d --build
 Публичная точка входа: порт `80` (nginx).  
 Прямой доступ: frontend `:3000`, API `:3001/api`, health `:3001/api/health`.
 
+На shared VPS / FastPanel с доменом: см. [deploy-server.md](./deploy-server.md) и `.env.server.example` (nginx на `127.0.0.1:8920`).
+
 ## Миграции и seed
 
 При старте backend-контейнера:
