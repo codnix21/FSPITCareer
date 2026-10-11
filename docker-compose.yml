@@ -54,6 +54,11 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       SEED_ON_START: ${SEED_ON_START:-false}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      EMAIL_VERIFICATION_TTL_HOURS: ${EMAIL_VERIFICATION_TTL_HOURS:-24}
     # Nest emits dist/src/main.js (src imports prisma/taxonomy.ts)
     command:
       [
